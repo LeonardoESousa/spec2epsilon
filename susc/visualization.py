@@ -113,7 +113,7 @@ def get_dielectric(films, fit, num_samples=10000):
     distributions = np.random.multivariate_normal(mean, cov, size=num_samples)
 
     w = -1*(films - distributions[:, 1]) / distributions[:, 0]
-    w = np.clip(w, None, 0.9999)  # Ensuring w does not exceed 1
+    w = np.clip(w, None, 1)  # Ensuring w does not exceed 1
     dielectric_samples = (1 + w) / (1 - w)
     median_dielectric = np.median(dielectric_samples, axis=0)
     lower = np.percentile(dielectric_samples, 25, axis=0)
