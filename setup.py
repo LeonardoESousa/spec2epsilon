@@ -13,8 +13,8 @@ from setuptools import find_packages, setup, Command
 
 # Package meta-data.
 NAME = 'suscs'
-DESCRIPTION = 'Visualization tool for NEMO ensembles'
-URL = 'https://github.com/LeonardoESousa/nemoview'
+DESCRIPTION = 'Solvent susceptibility calculator'
+URL = 'https://github.com/LeonardoESousa/susc'
 EMAIL = 'leonardo.sousa137@gmail.com'
 AUTHOR = 'Leonardo Evaristo de Sousa'
 REQUIRES_PYTHON = '>=3.8.0'
