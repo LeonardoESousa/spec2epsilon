@@ -14,6 +14,6 @@
 
 Once installed, use the command:
 
-`suscs`
+`susc`
 
 The application will open in your browser.
