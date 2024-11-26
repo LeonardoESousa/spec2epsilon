@@ -116,6 +116,6 @@ def get_dielectric(films, fit, num_samples=10000):
     w = np.clip(w, -1, 1)  # Ensuring w does not exceed 1
     dielectric_samples = (1 + w) / (1 - w)
     median_dielectric = np.median(dielectric_samples, axis=0)
-    lower = np.percentile(dielectric_samples, 25, axis=0)
-    upper = np.percentile(dielectric_samples, 75, axis=0)
+    lower = np.percentile(dielectric_samples, 15, axis=0)
+    upper = np.percentile(dielectric_samples, 85, axis=0)
     return median_dielectric, lower, upper
