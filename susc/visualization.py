@@ -92,27 +92,40 @@ def naming(arquivo, folder="."):
 
 ###############################################################
 
-def line(x,m,b):
-    return -1*m*x + b
+# Define the linear function with two independent variables
+def line(vars, m, n, b):
+    x1, x2 = vars
+    return -m * x1 + n * x2 + b
 
+# Linear fit of emission vs. epsilon (with constraints on m and n)
+def linear_fit(x1, x2, emission):
+    # Combine x1 and x2 into a tuple for curve_fit
+    vars = (x1, x2)
+    
+    # Set bounds: m, n and b >= 0
+    bounds = ([0, 0, 0], [np.inf, np.inf, np.inf])
+    
+    #initial guess
+    p0 = [1, 1, 0]
 
-#linear fit of emission vs. epsilon
-def linear_fit(alphas,emission):
-    #kwargs = {'loss': 'cauchy', 'method': 'trf'}
-    #sigma = [4*i for i in alphas if np.isnan(i) == False]
-    coeffs, cov = curve_fit(line, alphas, emission,nan_policy='omit')#, **kwargs) #sigma=sigma,
+    # Perform the fit
+    coeffs, cov = curve_fit(line, vars, emission, bounds=bounds, nan_policy='omit', p0=p0)
     return coeffs, cov
+
+
 
 def get_dielectric(films, fit, num_samples=10000):
     """
     Calculate dielectric constants using coefficients from linear fit,
     propagating uncertainties via Monte Carlo simulation.
     """
+    nr = 1.4
+    alpha = (nr**2-1)/(nr**2+1)
     mean, cov = fit
     # Generate distributions for susc and vac based on the covariance matrix
     distributions = np.random.multivariate_normal(mean, cov, size=num_samples)
 
-    w = -1*(films - distributions[:, 1]) / distributions[:, 0]
+    w = -1*(films - distributions[:, 2] - distributions[:,1]*alpha) / distributions[:, 0]
     w = np.clip(w, -1, 1)  # Ensuring w does not exceed 1
     dielectric_samples = (1 + w) / (1 - w)
     median_dielectric = np.median(dielectric_samples, axis=0)
