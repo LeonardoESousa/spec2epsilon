@@ -94,94 +94,80 @@ def naming(arquivo, folder="."):
 ###############################################################
 
 # Define the linear function with two independent variables
-def line(vars, m, n, b):
-    x1, x2 = vars
-    return -m * x1 + n * x2 + b
+def line(x1, m, b):
+    return -m * x1 + b
 
 # Linear fit of emission vs. epsilon (with constraints on m and n)
-def linear_fit(x1, x2, emission):
-    # Combine x1 and x2 into a tuple for curve_fit
-    vars = (x1, x2)
-    
-    # Set bounds: m, n and b >= 0
-    bounds = ([0, 0, 0], [np.inf, np.inf, np.inf])
+def linear_fit(x1, emission):
     
     #initial guess
-    p0 = [0, 10, 10]
+    p0 = [0, 10]
 
     # Perform the fit
-    coeffs, cov = curve_fit(line, vars, emission, bounds=bounds, nan_policy='omit', p0=p0)
+    coeffs, cov = curve_fit(line, x1, emission, nan_policy='omit', p0=p0)
     return coeffs, cov
+
+import numpy as np
 
 def ellipses(means, cov_matrix, num_points=200):
     """
-    Generates a 3D confidence ellipsoid for the given means and covariance matrix.
+    Generates a 2D confidence ellipse for the given means and 2x2 covariance matrix.
 
     Parameters:
-    means (array-like): The mean values of (m, n, b).
-    cov_matrix (array-like): The 3x3 covariance matrix.
-    num_points (int): Number of points per axis for visualization.
+    means (array-like): The mean values (length-2 array).
+    cov_matrix (2x2 array-like): The 2x2 covariance matrix.
+    num_points (int): Number of points for the ellipse perimeter.
 
     Returns:
-    np.ndarray: Points forming the 3D ellipsoid (shape: (num_points**2, 3)).
+    np.ndarray: Points forming the 2D ellipse (shape: (num_points, 2)).
     """
-    # Eigenvalue decomposition
+    # Eigen-decomposition of covariance matrix
     values, vectors = np.linalg.eigh(cov_matrix)
+    scaling_factors = np.sqrt(values)
 
-    # Generate unit sphere
-    u = np.linspace(0, 2 * np.pi, num_points)
-    v = np.linspace(0, np.pi, num_points)
-    x = np.outer(np.cos(u), np.sin(v)).flatten()
-    y = np.outer(np.sin(u), np.sin(v)).flatten()
-    z = np.outer(np.ones_like(u), np.cos(v)).flatten()
+    # Parametrize unit circle
+    theta = np.linspace(0, 2 * np.pi, num_points)
+    circle = np.stack([np.cos(theta), np.sin(theta)], axis=1)
 
-    # Stack into unit sphere points
-    unit_sphere = np.column_stack((x, y, z))
+    # Transform the unit circle into an ellipse
+    ellipse_points = circle @ np.diag(scaling_factors) @ vectors.T
 
-    # Scale and transform unit sphere using covariance matrix
-    scaling_factors = np.sqrt(values)  # Scale by standard deviation
-    ellipsoid_points = unit_sphere @ np.diag(scaling_factors) @ vectors.T
+    # Shift to the mean
+    ellipse_points += means
 
-    # Shift to mean position
-    ellipsoid_points += means
+    return ellipse_points
 
-    # Ensure m, n, b remain positive
-    #ellipsoid_points = np.clip(ellipsoid_points, 0, None)
-
-    return ellipsoid_points
 
 
 def sample_from_ellipse(mean, cov, num_samples=10000, confidence_level=1.0):
     """
-    Sample points from the confidence ellipse defined by the mean and covariance matrix.
+    Sample points from a 2D confidence ellipse defined by mean and 2x2 covariance matrix.
 
     Parameters:
-    mean (array-like): The mean values of (m, n, b).
-    cov (array-like): The 3x3 covariance matrix.
+    mean (array-like): The 2D mean vector.
+    cov (2x2 array-like): The 2x2 covariance matrix.
     num_samples (int): Number of samples to generate.
     confidence_level (float): Confidence level scaling (e.g., 1σ, 2σ).
 
     Returns:
-    np.ndarray: Samples (num_samples, 3) from the confidence ellipse.
+    np.ndarray: Samples (num_samples, 2) from the confidence ellipse.
     """
-    # Eigenvalue decomposition of covariance matrix
     eigenvalues, eigenvectors = np.linalg.eigh(cov)
-
-    # Scale eigenvalues for the confidence level (default = 1σ)
     scaling_factors = np.sqrt(eigenvalues) * confidence_level
-    ellipse_transform = eigenvectors @ np.diag(scaling_factors)
+    transform = eigenvectors @ np.diag(scaling_factors)
 
-    # Sample uniformly within the unit sphere
-    unit_samples = np.random.randn(num_samples, 3)  # Standard normal
-    unit_samples /= np.linalg.norm(unit_samples, axis=1, keepdims=True)  # Normalize to unit sphere
+    # Sample uniformly in unit circle
+    unit_samples = np.random.randn(num_samples, 2)
+    unit_samples /= np.linalg.norm(unit_samples, axis=1, keepdims=True)
 
-    # Apply transformation to match the confidence ellipse
-    samples = mean + unit_samples @ ellipse_transform.T
+    # Transform and shift
+    samples = mean + unit_samples @ transform.T
 
-    # Keep only valid samples where m > 0
-    valid_samples = samples[samples[:, 0] > 0]
+    # Optional: constrain to positive values (e.g., for physical quantities)
+    # samples = np.clip(samples, 0, None)
 
-    return valid_samples
+    return samples
+
 
 def get_dielectric(films, fit, num_samples=10000):
     """
@@ -189,15 +175,13 @@ def get_dielectric(films, fit, num_samples=10000):
     propagating uncertainties via Monte Carlo simulation,
     using sampling from the confidence ellipse instead of a multivariate Gaussian.
     """
-    nr = 1.4
-    alpha = (nr**2 - 1) / (nr**2 + 1)
     mean, cov = fit
 
     # Generate samples from the confidence ellipse
     distributions = sample_from_ellipse(mean, cov, num_samples)
 
     # Compute dielectric constant
-    w = -1 * (films - distributions[:, 2] - distributions[:, 1] * alpha) / distributions[:, 0]
+    w = -1 * (films - distributions[:, 1] ) / distributions[:, 0]
     w = np.clip(w, -1, 1)  # Ensuring w does not exceed 1
     dielectric_samples = (1 + w) / (1 - w)
 
