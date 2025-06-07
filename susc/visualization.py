@@ -95,7 +95,7 @@ def naming(arquivo, folder="."):
 
 # Define the linear function with two independent variables
 def line(x1, m, b):
-    return -m * x1 + b
+    return np.abs(b) - m * (2 * x1 -0.3243)
 
 # Linear fit of emission vs. epsilon (with constraints on m and n)
 def linear_fit(x1, emission):
@@ -107,7 +107,6 @@ def linear_fit(x1, emission):
     coeffs, cov = curve_fit(line, x1, emission, nan_policy='omit', p0=p0)
     return coeffs, cov
 
-import numpy as np
 
 def ellipses(means, cov_matrix, num_points=200):
     """
@@ -181,7 +180,7 @@ def get_dielectric(films, fit, num_samples=10000):
     distributions = sample_from_ellipse(mean, cov, num_samples)
 
     # Compute dielectric constant
-    w = -1 * (films - distributions[:, 1] ) / distributions[:, 0]
+    w = -1 * (films - distributions[:, 1] ) / (2 *distributions[:, 0]) + 0.3243/2
     w = np.clip(w, -1, 1)  # Ensuring w does not exceed 1
     dielectric_samples = (1 + w) / (1 - w)
 
