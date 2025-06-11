@@ -107,68 +107,7 @@ def linear_fit(x1, emission):
     coeffs, cov = curve_fit(line, x1, emission, nan_policy='omit', p0=p0)
     return coeffs, cov
 
-
-def ellipses(means, cov_matrix, num_points=200):
-    """
-    Generates a 2D confidence ellipse for the given means and 2x2 covariance matrix.
-
-    Parameters:
-    means (array-like): The mean values (length-2 array).
-    cov_matrix (2x2 array-like): The 2x2 covariance matrix.
-    num_points (int): Number of points for the ellipse perimeter.
-
-    Returns:
-    np.ndarray: Points forming the 2D ellipse (shape: (num_points, 2)).
-    """
-    # Eigen-decomposition of covariance matrix
-    values, vectors = np.linalg.eigh(cov_matrix)
-    scaling_factors = np.sqrt(values)
-
-    # Parametrize unit circle
-    theta = np.linspace(0, 2 * np.pi, num_points)
-    circle = np.stack([np.cos(theta), np.sin(theta)], axis=1)
-
-    # Transform the unit circle into an ellipse
-    ellipse_points = circle @ np.diag(scaling_factors) @ vectors.T
-
-    # Shift to the mean
-    ellipse_points += means
-
-    return ellipse_points
-
-
-
-def sample_from_ellipse(mean, cov, num_samples=10000, confidence_level=1.0):
-    """
-    Sample points from a 2D confidence ellipse defined by mean and 2x2 covariance matrix.
-
-    Parameters:
-    mean (array-like): The 2D mean vector.
-    cov (2x2 array-like): The 2x2 covariance matrix.
-    num_samples (int): Number of samples to generate.
-    confidence_level (float): Confidence level scaling (e.g., 1σ, 2σ).
-
-    Returns:
-    np.ndarray: Samples (num_samples, 2) from the confidence ellipse.
-    """
-    eigenvalues, eigenvectors = np.linalg.eigh(cov)
-    scaling_factors = np.sqrt(eigenvalues) * confidence_level
-    transform = eigenvectors @ np.diag(scaling_factors)
-
-    # Sample uniformly in unit circle
-    unit_samples = np.random.randn(num_samples, 2)
-    unit_samples /= np.linalg.norm(unit_samples, axis=1, keepdims=True)
-
-    # Transform and shift
-    samples = mean + unit_samples @ transform.T
-
-    # Optional: constrain to positive values (e.g., for physical quantities)
-    # samples = np.clip(samples, 0, None)
-
-    return samples
-
-
-def get_dielectric(films, fit, num_samples=10000):
+def get_dielectric(films, fit, nr=1.4, num_samples=10000):
     """
     Calculate dielectric constants using coefficients from linear fit,
     propagating uncertainties via Monte Carlo simulation,
@@ -176,11 +115,13 @@ def get_dielectric(films, fit, num_samples=10000):
     """
     mean, cov = fit
 
-    # Generate samples from the confidence ellipse
-    distributions = sample_from_ellipse(mean, cov, num_samples)
+    alpha_opt = (nr**2-1) / (nr**2+1)
+
+    # Generate samples from multivariate normal distribution
+    distributions = np.random.multivariate_normal(mean, cov, num_samples)
 
     # Compute dielectric constant
-    w = -1 * (films - distributions[:, 1] ) / (2 *distributions[:, 0]) + 0.3243/2
+    w = -1 * (films - distributions[:, 1] ) / (2 *distributions[:, 0]) + alpha_opt/2
     w = np.clip(w, -1, 1)  # Ensuring w does not exceed 1
     dielectric_samples = (1 + w) / (1 - w)
 
