@@ -121,7 +121,7 @@ def get_dielectric(films, fit, nr=1.4, num_samples=10000):
     distributions = np.random.multivariate_normal(mean, cov, num_samples)
 
     # Compute dielectric constant
-    w = -1 * (films - distributions[:, 1] ) / (2 *distributions[:, 0]) + alpha_opt/2
+    w =  (distributions[:, 1] - films) / (2 *distributions[:, 0] ) + alpha_opt/2
     w = np.clip(w, -1, 1)  # Ensuring w does not exceed 1
     dielectric_samples = (1 + w) / (1 - w)
 

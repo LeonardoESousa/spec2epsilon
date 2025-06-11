@@ -1,5 +1,19 @@
 import ipywidgets as widgets
 
+def n_r(kw, nr0=1.4):
+    nr = widgets.BoundedFloatText(
+        value=nr0,
+        step=0.1,
+        min=1,
+        max=10.0,
+        description="$n_r$",
+        tooltip="Film Refractive index",
+        disabled=False,
+    )
+    kw['nr'] = nr
+    return nr, kw
+
+
 def eps_nr(kw,eps0=1, nr0=1):
     eps = widgets.BoundedFloatText(
         value=eps0,
