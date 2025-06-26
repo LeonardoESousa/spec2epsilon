@@ -62,18 +62,36 @@ def fill(ax, xmin, xmax, y, text):
         )
 
 
-def format_rate(rate, error_rate):
+
+def format_number(rate, error_rate, unit="s^-1"):
+    # Check if the rate is zero
+    if rate <= 1e-99:
+        return f"0 ± 0 {unit}"
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        exp = int(np.nan_to_num(np.log10(rate)))
-    if exp < -100:
-        exp = -100
-    if exp != 0:
-        formatted_string = f"${rate/10**exp:.1f}\\pm{error_rate/10**exp:.1f}\\times10^{{{exp}}}$ $s^{{-1}}$"
-    else:
-        formatted_string = f"${rate/10**exp:.1f}\\pm{error_rate/10**exp:.1f}$ $s^{{-1}}$"
-    return formatted_string
+        exp = np.floor(np.nan_to_num(np.log10(rate)))
 
+    # Adjust exponent to ensure the first number is >= 1
+    if rate / 10**exp < 1:
+        exp -= 1
+
+    num = 2
+    # Determine the number of significant figures for rate and error_rate
+    rate_sig_figs = max(num, -int(np.floor(np.log10(error_rate / 10**exp))))  # Ensure at least 1 significant figure
+    error_rate_sig_figs = max(num, -int(np.floor(np.log10(error_rate / 10**exp))))  # Ensure at least 1 significant figure
+
+    # Format the string without using LaTeX
+    if exp > num:
+        formatted_rate = f"{rate/10**exp:.{rate_sig_figs}f}"
+        formatted_error_rate = f"{error_rate/10**exp:.{error_rate_sig_figs}f}"
+        formatted_string = f"({formatted_rate} ± {formatted_error_rate}) x 10^{int(exp)} {unit}"
+    else:
+        formatted_rate = f"{rate:.{rate_sig_figs}f}"
+        formatted_error_rate = f"{error_rate:.{error_rate_sig_figs}f}"
+        formatted_string = f"{formatted_rate} ± {formatted_error_rate} {unit}"
+
+    return formatted_string
 
 #################################################################################################################################
 ##PREVENTS OVERWRITING#########################################
