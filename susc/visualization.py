@@ -112,8 +112,8 @@ def naming(arquivo, folder="."):
 ###############################################################
 
 # Define the linear function with two independent variables
-def line(x1, m, b):
-    return np.abs(b) - m * (2 * x1 -0.3243)
+def model(alpha_st, chi, e_vac):
+    return e_vac - chi * (2 * alpha_st - 0.3243)
 
 # Linear fit of emission vs. epsilon (with constraints on m and n)
 def linear_fit(x1, emission):
@@ -122,7 +122,7 @@ def linear_fit(x1, emission):
     p0 = [0, 10]
 
     # Perform the fit
-    coeffs, cov = curve_fit(line, x1, emission, nan_policy='omit', p0=p0)
+    coeffs, cov = curve_fit(model, x1, emission, nan_policy='omit', p0=p0)
     return coeffs, cov
 
 def get_dielectric(films, fit, nr=1.4, num_samples=10000):
