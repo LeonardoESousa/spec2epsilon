@@ -112,8 +112,9 @@ def naming(arquivo, folder="."):
 ###############################################################
 
 # Define the linear function with two independent variables
-def model(alpha_st, chi, e_vac):
-    return e_vac - chi * (2 * alpha_st - 0.3243)
+def model(x, chi, e_vac):
+    alpha_st, alpha_opt = x
+    return e_vac - chi * (2 * alpha_st - alpha_opt)
 
 # Linear fit of emission vs. epsilon (with constraints on m and n)
 def linear_fit(x1, emission):
@@ -129,24 +130,47 @@ def get_dielectric(films, fit, nr=1.4, num_samples=10000):
     """
     Calculate dielectric constants using coefficients from linear fit,
     propagating uncertainties via Monte Carlo simulation,
-    using sampling from the confidence ellipse instead of a multivariate Gaussian.
+    using sampling from a multivariate Gaussian.
+    
+    - films: scalar or 1D array of film thicknesses (or whatever x-axis you have)
+    - fit: tuple (mean_coeffs, cov_matrix) from your curve_fit
+    - nr: scalar or 1D array matching films
+    - num_samples: number of MC draws
     """
     mean, cov = fit
 
-    alpha_opt = (nr**2-1) / (nr**2+1)
+    # ensure numpy arrays and proper shapes
+    films = np.atleast_1d(films)
+    nr    = np.atleast_1d(nr)
+    if nr.shape not in [(1,), films.shape]:
+        raise ValueError("nr must be scalar or same shape as films")
+    
+    # compute alpha_opt per film
+    alpha_opt = (nr**2 - 1) / (nr**2 + 1)
 
-    # Generate samples from multivariate normal distribution
-    distributions = np.random.multivariate_normal(mean, cov, num_samples)
+    # draw MC samples of (chi, e_vac)
+    dist = np.random.multivariate_normal(mean, cov, size=num_samples)
+    chi_s   = dist[:, 0]           # shape (num_samples,)
+    e_vac_s = dist[:, 1]           # shape (num_samples,)
 
-    # Compute dielectric constant
-    w =  (distributions[:, 1] - films) / (2 *distributions[:, 0] ) + alpha_opt/2
-    w = np.clip(w, -1, 1)  # Ensuring w does not exceed 1
-    dielectric_samples = (1 + w) / (1 - w)
+    # now compute w for each sample × each film:
+    #   w_{j,i} = (e_vac_s[j] - films[i]) / (2*chi_s[j]) + alpha_opt[i] / 2
+    num = e_vac_s[:, None] - films[None, :]        # (num_samples, n_films)
+    den = 2 * chi_s[:, None]                       # (num_samples, 1)
+    w   = num/den + alpha_opt[None, :]/2           # broadcasts scalar or per‑film alpha_opt
+    w   = np.clip(w, -1, 1)
 
-    # Compute confidence intervals
-    median_dielectric = np.median(dielectric_samples, axis=0)
-    lower = np.percentile(dielectric_samples, 15, axis=0)
-    upper = np.percentile(dielectric_samples, 85, axis=0)
+    # dielectric ε = (1 + w)/(1 - w)
+    eps = (1 + w) / (1 - w)                        # (num_samples, n_films)
 
-    return median_dielectric, lower, upper
+    # summary statistics along the sample axis
+    median = np.median(eps, axis=0)
+    lower  = np.percentile(eps, 15, axis=0)
+    upper  = np.percentile(eps, 85, axis=0)
+
+    # if films was scalar, return scalars
+    if median.size == 1:
+        return median.item(), lower.item(), upper.item()
+    return median, lower, upper
+
 
