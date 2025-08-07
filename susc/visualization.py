@@ -126,51 +126,71 @@ def linear_fit(x1, emission):
     coeffs, cov = curve_fit(model, x1, emission, nan_policy='omit', p0=p0)
     return coeffs, cov
 
-def get_dielectric(films, fit, nr=1.4, num_samples=10000):
+import numpy as np
+
+def get_dielectric(films, fit, nr=1.4, num_samples=10000, epsilon_max=np.inf):
     """
     Calculate dielectric constants using coefficients from linear fit,
-    propagating uncertainties via Monte Carlo simulation,
-    using sampling from a multivariate Gaussian.
+    propagating uncertainties via Monte Carlo simulation.
     
-    - films: scalar or 1D array of film thicknesses (or whatever x-axis you have)
-    - fit: tuple (mean_coeffs, cov_matrix) from your curve_fit
-    - nr: scalar or 1D array matching films
-    - num_samples: number of MC draws
+    - Filters out unphysical dielectric values (ε < nr²).
+    - Optionally caps very large ε to epsilon_max.
+    - Supports scalar or array inputs for films and nr.
+    - Uses 68% confidence interval (16th to 84th percentiles).
+
+    Parameters:
+        films : float or array-like
+            Emission energies (or x-values) where ε is to be computed.
+        fit : tuple
+            Tuple of (mean, covariance matrix) from a linear fit.
+        nr : float or array-like
+            Refractive index(s) at each film point.
+        num_samples : int
+            Number of Monte Carlo samples.
+        epsilon_max : float
+            Optional upper cap for dielectric values.
+
+    Returns:
+        median : np.ndarray or float
+        lower  : np.ndarray or float
+        upper  : np.ndarray or float
     """
     mean, cov = fit
 
-    # ensure numpy arrays and proper shapes
+    # Ensure input shapes
     films = np.atleast_1d(films)
     nr    = np.atleast_1d(nr)
     if nr.shape not in [(1,), films.shape]:
         raise ValueError("nr must be scalar or same shape as films")
-    
-    # compute alpha_opt per film
+
+    # Compute alpha_opt
     alpha_opt = (nr**2 - 1) / (nr**2 + 1)
 
-    # draw MC samples of (chi, e_vac)
+    # Monte Carlo samples
     dist = np.random.multivariate_normal(mean, cov, size=num_samples)
-    chi_s   = dist[:, 0]           # shape (num_samples,)
-    e_vac_s = dist[:, 1]           # shape (num_samples,)
+    chi_s   = dist[:, 0]  # shape (num_samples,)
+    e_vac_s = dist[:, 1]  # shape (num_samples,)
 
-    # now compute w for each sample × each film:
-    #   w_{j,i} = (e_vac_s[j] - films[i]) / (2*chi_s[j]) + alpha_opt[i] / 2
-    num = e_vac_s[:, None] - films[None, :]        # (num_samples, n_films)
-    den = 2 * chi_s[:, None]                       # (num_samples, 1)
-    w   = num/den + alpha_opt[None, :]/2           # broadcasts scalar or per‑film alpha_opt
-    w   = np.clip(w, -1, 1)
+    # Compute w
+    num = e_vac_s[:, None] - films[None, :]  # shape (samples, films)
+    den = 2 * chi_s[:, None]                 # shape (samples, 1)
+    w   = num / den + alpha_opt[None, :] / 2
+    w   = np.clip(w, -1, 1)     # avoid division problems
 
-    # dielectric ε = (1 + w)/(1 - w)
-    eps = (1 + w) / (1 - w)                        # (num_samples, n_films)
+    # Compute ε
+    eps = (1 + w) / (1 - w)
 
-    # summary statistics along the sample axis
-    median = np.median(eps, axis=0)
-    lower  = np.percentile(eps, 15, axis=0)
-    upper  = np.percentile(eps, 85, axis=0)
+    # Filter out ε < nr² and optionally cap ε
+    min_eps = nr**2
+    eps = np.where(eps >= min_eps, eps, np.nan)
+    eps = np.where(eps <= epsilon_max, eps, np.inf)
 
-    # if films was scalar, return scalars
+    # Compute statistics (ignoring NaN)
+    median = np.nanmedian(eps, axis=0)
+    lower  = np.nanpercentile(eps, 16, axis=0)
+    upper  = np.nanpercentile(eps, 84, axis=0)
+
+    # Return scalars if input was scalar
     if median.size == 1:
         return median.item(), lower.item(), upper.item()
     return median, lower, upper
-
-
