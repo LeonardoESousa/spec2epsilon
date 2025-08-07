@@ -194,3 +194,45 @@ def get_dielectric(films, fit, nr=1.4, num_samples=10000, epsilon_max=np.inf):
     if median.size == 1:
         return median.item(), lower.item(), upper.item()
     return median, lower, upper
+
+import numpy as np
+from scipy.stats import chi2
+
+def plot_confidence_ellipse(fit, ax, confidence=0.68, num_points=200, **kwargs):
+    """
+    Plot a confidence ellipse using a scatter plot, based on (mean, cov).
+
+    Parameters:
+        fit : tuple
+            (mean, covariance matrix), with 2D mean and 2x2 cov matrix.
+        ax : matplotlib.axes.Axes
+            Axis object to draw the ellipse in.
+        confidence : float
+            Confidence level (default: 0.68 for 1σ).
+        num_points : int
+            Number of points to sample around the ellipse.
+        **kwargs :
+            Additional keyword arguments passed to ax.plot (e.g., color, linestyle).
+    
+    Returns:
+        Line2D object from ax.plot
+    """
+    mean, cov = fit
+    if len(mean) != 2 or cov.shape != (2, 2):
+        raise ValueError("fit must contain a 2D mean and a 2x2 covariance matrix")
+
+    # Radius of ellipse for given confidence level
+    chi2_val = chi2.ppf(confidence, df=2)
+    radius = np.sqrt(chi2_val)
+
+    # Parametric angles
+    theta = np.linspace(0, 2 * np.pi, num_points)
+
+    # Unit circle
+    circle = np.stack([np.cos(theta), np.sin(theta)])  # shape: (2, num_points)
+
+    # Transform circle using Cholesky decomposition
+    ellipse = mean[:, None] + radius * np.linalg.cholesky(cov) @ circle
+
+    # Plot as line
+    return ax.plot(ellipse[0], ellipse[1], **kwargs)
