@@ -125,28 +125,51 @@ def linear_fit(x1, emission):
     coeffs, cov = curve_fit(model, x1, emission, nan_policy='omit', p0=p0)
     return coeffs, cov
 
+import numpy as np
+
 def get_dielectric(films, fit, nr=1.4, num_samples=10000):
     """
     Calculate dielectric constants using coefficients from linear fit,
-    propagating uncertainties via Monte Carlo simulation,
-    using sampling from the confidence ellipse instead of a multivariate Gaussian.
+    propagating uncertainties via Monte Carlo simulation.
+    
+    - Uses sampling from a multivariate Gaussian defined by the fit.
+    - Filters out unphysical dielectric values (ε < nr²).
+    - Uses 68% confidence interval (16th to 84th percentiles).
+    
+    Parameters:
+        films : float or array-like
+            Input x-values (e.g., film data points) where ε is to be computed.
+        fit : tuple
+            Tuple of (mean, covariance matrix) from linear regression.
+        nr : float
+            Refractive index of the reference medium.
+        num_samples : int
+            Number of Monte Carlo samples.
+            
+    Returns:
+        median_dielectric : np.ndarray
+        lower : np.ndarray
+        upper : np.ndarray
     """
     mean, cov = fit
-
-    alpha_opt = (nr**2-1) / (nr**2+1)
+    alpha_opt = (nr**2 - 1) / (nr**2 + 1)
 
     # Generate samples from multivariate normal distribution
     distributions = np.random.multivariate_normal(mean, cov, num_samples)
 
-    # Compute dielectric constant
-    w =  (distributions[:, 1] - films) / (2 *distributions[:, 0] ) + alpha_opt/2
-    w = np.clip(w, -1, 1)  # Ensuring w does not exceed 1
-    dielectric_samples = (1 + w) / (1 - w)
+    # Compute w
+    w = (distributions[:, 1][:, np.newaxis] - films) / (2 * distributions[:, 0][:, np.newaxis]) + alpha_opt / 2
+    w = np.clip(w, -1, 1)  # avoid division issues at w = ±1
 
-    # Compute confidence intervals
-    median_dielectric = np.median(dielectric_samples, axis=0)
-    lower = np.percentile(dielectric_samples, 15, axis=0)
-    upper = np.percentile(dielectric_samples, 85, axis=0)
+    # Compute dielectric samples and filter invalid values
+    raw_eps = (1 + w) / (1 - w)
+    dielectric_samples = np.where(raw_eps >= nr**2, raw_eps, np.nan)
 
-    return median_dielectric, lower, upper
+    # Compute statistics ignoring invalid samples
+    median_dielectric = np.nanmedian(dielectric_samples, axis=0)
+    lower = np.nanpercentile(dielectric_samples, 16, axis=0)
+    upper = np.nanpercentile(dielectric_samples, 84, axis=0)
+
+    return median_dielectric[0], lower[0], upper[0]
+
 

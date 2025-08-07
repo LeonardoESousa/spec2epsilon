@@ -6,8 +6,8 @@ def n_r(kw, nr0=1.4):
         step=0.1,
         min=1,
         max=10.0,
-        description="$n_r$",
-        tooltip="Film Refractive index",
+        description="n_r",
+        tooltip="Sample Refractive index",
         disabled=False,
     )
     kw['nr'] = nr
