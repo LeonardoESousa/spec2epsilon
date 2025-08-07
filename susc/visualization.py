@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from scipy.optimize import curve_fit
 from scipy.optimize import minimize
+from scipy.stats import chi2
 # pylint: disable=unbalanced-tuple-unpacking
 
 THECOLOR = "black"
@@ -112,8 +113,9 @@ def naming(arquivo, folder="."):
 ###############################################################
 
 # Define the linear function with two independent variables
-def model(alpha_st, chi, e_vac):
-    return e_vac - chi * (2 * alpha_st - 0.3243)
+def model(x, chi, e_vac):
+    alpha_st, alpha_opt = x
+    return e_vac - chi * (2 * alpha_st - alpha_opt)
 
 # Linear fit of emission vs. epsilon (with constraints on m and n)
 def linear_fit(x1, emission):
@@ -125,51 +127,107 @@ def linear_fit(x1, emission):
     coeffs, cov = curve_fit(model, x1, emission, nan_policy='omit', p0=p0)
     return coeffs, cov
 
-import numpy as np
 
 def get_dielectric(films, fit, nr=1.4, num_samples=10000):
     """
     Calculate dielectric constants using coefficients from linear fit,
     propagating uncertainties via Monte Carlo simulation.
     
-    - Uses sampling from a multivariate Gaussian defined by the fit.
     - Filters out unphysical dielectric values (ε < nr²).
+    - Optionally caps very large ε to epsilon_max.
+    - Supports scalar or array inputs for films and nr.
     - Uses 68% confidence interval (16th to 84th percentiles).
-    
+
     Parameters:
         films : float or array-like
-            Input x-values (e.g., film data points) where ε is to be computed.
+            Emission energies (or x-values) where ε is to be computed.
         fit : tuple
-            Tuple of (mean, covariance matrix) from linear regression.
-        nr : float
-            Refractive index of the reference medium.
+            Tuple of (mean, covariance matrix) from a linear fit.
+        nr : float or array-like
+            Refractive index(s) at each film point.
         num_samples : int
             Number of Monte Carlo samples.
-            
+        
     Returns:
-        median_dielectric : np.ndarray
-        lower : np.ndarray
-        upper : np.ndarray
+        median : np.ndarray or float
+        lower  : np.ndarray or float
+        upper  : np.ndarray or float
     """
     mean, cov = fit
+
+    # Ensure input shapes
+    films = np.atleast_1d(films)
+    nr    = np.atleast_1d(nr)
+    if nr.shape not in [(1,), films.shape]:
+        raise ValueError("nr must be scalar or same shape as films")
+
+    # Compute alpha_opt
     alpha_opt = (nr**2 - 1) / (nr**2 + 1)
 
-    # Generate samples from multivariate normal distribution
-    distributions = np.random.multivariate_normal(mean, cov, num_samples)
+    # Monte Carlo samples
+    dist = np.random.multivariate_normal(mean, cov, size=num_samples)
+    chi_s   = dist[:, 0]  # shape (num_samples,)
+    e_vac_s = dist[:, 1]  # shape (num_samples,)
 
     # Compute w
-    w = (distributions[:, 1][:, np.newaxis] - films) / (2 * distributions[:, 0][:, np.newaxis]) + alpha_opt / 2
-    w = np.clip(w, -1, 1)  # avoid division issues at w = ±1
+    num = e_vac_s[:, None] - films[None, :]  # shape (samples, films)
+    den = 2 * chi_s[:, None]                 # shape (samples, 1)
+    w   = num / den + alpha_opt[None, :] / 2
+    w   = np.clip(w, -1, 1)     # avoid division problems
 
-    # Compute dielectric samples and filter invalid values
-    raw_eps = (1 + w) / (1 - w)
-    dielectric_samples = np.where(raw_eps >= nr**2, raw_eps, np.nan)
+    # Compute ε
+    eps = (1 + w) / (1 - w)
 
-    # Compute statistics ignoring invalid samples
-    median_dielectric = np.nanmedian(dielectric_samples, axis=0)
-    lower = np.nanpercentile(dielectric_samples, 16, axis=0)
-    upper = np.nanpercentile(dielectric_samples, 84, axis=0)
+    # Filter out ε < nr² and optionally cap ε
+    min_eps = nr**2
+    eps = np.where(eps >= min_eps, eps, np.nan)
+    
+    # Compute statistics (ignoring NaN)
+    median = np.nanmedian(eps, axis=0)
+    lower  = np.nanpercentile(eps, 16, axis=0)
+    upper  = np.nanpercentile(eps, 84, axis=0)
 
-    return median_dielectric[0], lower[0], upper[0]
+    # Return scalars if input was scalar
+    if median.size == 1:
+        return median.item(), lower.item(), upper.item()
+    return median, lower, upper
 
 
+def plot_confidence_ellipse(fit, ax, confidence=0.68, num_points=200, **kwargs):
+    """
+    Plot a confidence ellipse using a scatter plot, based on (mean, cov).
+
+    Parameters:
+        fit : tuple
+            (mean, covariance matrix), with 2D mean and 2x2 cov matrix.
+        ax : matplotlib.axes.Axes
+            Axis object to draw the ellipse in.
+        confidence : float
+            Confidence level (default: 0.68 for 1σ).
+        num_points : int
+            Number of points to sample around the ellipse.
+        **kwargs :
+            Additional keyword arguments passed to ax.plot (e.g., color, linestyle).
+    
+    Returns:
+        Line2D object from ax.plot
+    """
+    mean, cov = fit
+    if len(mean) != 2 or cov.shape != (2, 2):
+        raise ValueError("fit must contain a 2D mean and a 2x2 covariance matrix")
+
+    # Radius of ellipse for given confidence level
+    chi2_val = chi2.ppf(confidence, df=2)
+    radius = np.sqrt(chi2_val)
+
+    # Parametric angles
+    theta = np.linspace(0, 2 * np.pi, num_points)
+
+    # Unit circle
+    circle = np.stack([np.cos(theta), np.sin(theta)])  # shape: (2, num_points)
+
+    # Transform circle using Cholesky decomposition
+    ellipse = mean[:, None] + radius * np.linalg.cholesky(cov) @ circle
+
+    # Plot as line
+    return ax.plot(ellipse[0], ellipse[1], **kwargs)
