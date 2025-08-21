@@ -2,7 +2,7 @@
 
 
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg?style=plastic)](https://www.python.org/)
-[![maint](https://img.shields.io/maintenance/yes/2024?style=plastic)]()
+[![maint](https://img.shields.io/maintenance/yes/2025?style=plastic)]()
 [![commit](https://img.shields.io/github/last-commit/LeonardoESousa/suscs?style=plastic)]()
 
 
