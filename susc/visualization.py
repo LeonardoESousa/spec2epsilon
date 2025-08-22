@@ -1,6 +1,7 @@
 import warnings
 import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from scipy.optimize import curve_fit
@@ -112,13 +113,26 @@ def naming(arquivo, folder="."):
 
 ###############################################################
 
+def load_data(file):
+    data = pd.read_csv(file, skipinitialspace=True)  # trims spaces right after commas
+    data.columns = data.columns.str.strip()
+    # remove whitespace from every string cell
+    data = data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    data['epsilon'] = pd.to_numeric(data['epsilon'], errors='coerce')
+    data['nr'] = pd.to_numeric(data['nr'], errors='coerce')
+    # all numerical values above 100 are considered have to be converted to eV
+    for col in data.columns:
+        if col.lower() not in ['solvent', 'epsilon', 'nr']:
+            data[col] = data[col].apply(lambda x: 1240/float(x) if float(x) > 100 else float(x))
+    return data
+
 # Define the linear function with two independent variables
 def model(x, chi, e_vac):
     alpha_st, alpha_opt = x
     return e_vac - chi * (2 * alpha_st - alpha_opt)
 
 # Linear fit of emission vs. epsilon (with constraints on m and n)
-def linear_fit(x1, emission):
+def characterize(x1, emission):
     
     #initial guess
     p0 = [0, 10]
@@ -128,7 +142,8 @@ def linear_fit(x1, emission):
     return coeffs, cov
 
 
-def get_dielectric(films, fit, nr=1.4, num_samples=10000):
+
+def compute_dielectric(films, fit, nr=1.4, num_samples=10000):
     """
     Calculate dielectric constants using coefficients from linear fit,
     propagating uncertainties via Monte Carlo simulation.
@@ -190,6 +205,15 @@ def get_dielectric(films, fit, nr=1.4, num_samples=10000):
     # Return scalars if input was scalar
     if median.size == 1:
         return median.item(), lower.item(), upper.item()
+    return median, lower, upper
+
+
+def dielectric(data, film, molecule, opt, cov):
+    # filter data for the specific film and molecule
+    inference = data[data['epsilon'].isna()]
+    emi = inference[inference['Solvent'] == film][molecule].to_numpy()
+    nrs = inference[inference['Solvent'] == film]['nr'].to_numpy()
+    median, lower, upper = compute_dielectric(emi, (opt,cov), nr=nrs)
     return median, lower, upper
 
 
