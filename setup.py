@@ -12,9 +12,9 @@ from shutil import rmtree
 from setuptools import find_packages, setup, Command
 
 # Package meta-data.
-NAME = 'suscs'
-DESCRIPTION = 'Solvent susceptibility calculator'
-URL = 'https://github.com/LeonardoESousa/susc'
+NAME = 'spec2epsilon'
+DESCRIPTION = 'Estimate dielectric constant from fluorescence spectra'
+URL = 'https://github.com/LeonardoESousa/spec2epsilon'
 EMAIL = 'leonardo.sousa137@gmail.com'
 AUTHOR = 'Leonardo Evaristo de Sousa'
 REQUIRES_PYTHON = '>=3.8.0'
@@ -45,7 +45,7 @@ except FileNotFoundError:
 
 # Load the package's __version__.py module as a dictionary.
 about = {}
-project_slug = 'susc'
+project_slug = 'spec2epsilon'
 with open(os.path.join(here, project_slug, '__version__.py'),encoding='utf-8') as f:
     exec(f.read(), about)
 
@@ -101,7 +101,7 @@ setup(
     packages=find_packages(exclude=["tests", "*.tests", "*.tests.*", "tests.*"]),
     # If your package is a single module, use this instead of 'packages':
     #py_modules=['mypackage'],
-    entry_points={'console_scripts': ["susc = susc.__main__:main"]},
+    entry_points={'console_scripts': ["spec2epsilon = spec2epsilon.__main__:main"]},
     install_requires=REQUIRED,
     extras_require=EXTRAS,
     include_package_data=True,

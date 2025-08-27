@@ -1,4 +1,4 @@
-# Suscs - Solvent susceptibility calculator
+# spec2epsilon - Estimate dielectric constants from fluorescence spectra
 
 
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg?style=plastic)](https://www.python.org/)
@@ -14,6 +14,6 @@
 
 Once installed, use the command:
 
-`susc`
+`spec2epsilon`
 
 The application will open in your browser.
