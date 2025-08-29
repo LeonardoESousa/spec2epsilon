@@ -1,3 +1,2 @@
 include README.md LICENSE
-include spec2epsilon/*.ipynb
 include spec2epsilon/*mplstyle

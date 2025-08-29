@@ -1,13 +1,18 @@
+# spec2epsilon/__main__.py
+
+import sys
 import os
-import subprocess
+import streamlit.web.cli as stcli
 
 def main():
-    path = os.path.join(os.path.dirname(__file__),"susc.ipynb")
-    path = r"{} ".format(path)
-    try:
-        option = r'--Voila.tornado_settings={}'.format('''{'websocket_max_message_size': 209715200}''')
-        subprocess.check_output(['voila',path,option])
-    except subprocess.CalledProcessError:
-        option =  " --Voila.tornado_settings \"'websocket_max_message_size'=209715200\""
-        command = "voila "+path+option
-        subprocess.run(command, shell=True)
+    """Entry point for the `spec2epsilon` console command."""
+    # Resolve the path to your Streamlit app script
+    app_path = os.path.join(os.path.dirname(__file__), "app.py")
+
+    # Equivalent to running: streamlit run app.py
+    sys.argv = ["streamlit", "run", app_path]
+    sys.exit(stcli.main())
+
+if __name__ == "__main__":
+    main()
+
