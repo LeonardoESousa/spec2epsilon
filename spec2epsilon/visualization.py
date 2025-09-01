@@ -13,55 +13,6 @@ THECOLOR = "black"
 cmap = plt.get_cmap("cividis")
 
 
-def set_fontsize(ax):
-    fig_size = ax.get_figure().get_size_inches()
-    # define font size based dynamically on figure size
-    fontsize = max(fig_size[0] * 100 / 72, 14)
-    return fontsize
-
-
-def check(ax, xmin, xmax):
-    x = sorted([xmin, xmax])
-    y = None
-    for elem in ax.get_children():
-        try:
-            vert = elem.get_paths()[0].vertices
-            xs = list(sorted(vert[:, 0]))
-            if xs == x and 0 not in vert[:, 1]:
-                y = vert[1, 1]
-        except (IndexError, AttributeError):
-            pass
-    return y
-
-
-def fill(ax, xmin, xmax, y, text):
-    fontsize = set_fontsize(ax)
-    newy = check(ax, xmin, xmax)
-    try:
-        ax.fill_between([xmin, xmax], y, newy, alpha=0.5, hatch="x", color=cmap(0.5))
-        txt_x = xmin + (xmax - xmin) / 2
-        for txt in ax.texts:
-            if txt.get_position()[0] == txt_x and txt.get_position()[1] != -0.4:
-                txt.set_visible(False)
-        ax.text(
-            x=txt_x,
-            y= 0.95 * min(newy, y),
-            s=text,
-            ha="center",
-            va="top",
-            color=THECOLOR,
-            fontsize=fontsize,
-        )
-    except TypeError :
-        ax.text(
-            x=xmin + (xmax - xmin) / 2,
-            y=0.95 * y,
-            s=text,
-            ha="center",
-            va="top",
-            color=THECOLOR,
-            fontsize=fontsize,
-        )
 
 
 
@@ -95,27 +46,16 @@ def format_number(rate, error_rate, unit="s^-1"):
 
     return formatted_string
 
-#################################################################################################################################
-##PREVENTS OVERWRITING#########################################
-def naming(arquivo, folder="."):
-    new_arquivo = arquivo
-    if arquivo in os.listdir(folder):
-        duplo = True
-        vers = 2
-        while duplo:
-            new_arquivo = str(vers) + arquivo
-            if new_arquivo in os.listdir(folder):
-                vers += 1
-            else:
-                duplo = False
-    return new_arquivo
-
 
 ###############################################################
 
 def load_data(file):
     data = pd.read_csv(file, skipinitialspace=True)  # trims spaces right after commas
     data.columns = data.columns.str.strip()
+    cols = {c: c for c in data.columns}
+    if "solvent" in data.columns and "Solvent" not in data.columns:
+        cols["solvent"] = "Solvent"
+    data.rename(columns=cols, inplace=True)
     # remove whitespace from every string cell
     data = data.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     data['epsilon'] = pd.to_numeric(data['epsilon'], errors='coerce')

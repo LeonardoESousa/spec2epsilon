@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from spec2epsilon import visualization
 
 import plotly.graph_objects as go
 import plotly.express as px
@@ -21,13 +22,6 @@ import plotly.express as px
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 pd.options.mode.chained_assignment = None
 
-# --- Try to import the visualization helpers ---
-viz_err = None
-try:
-    from spec2epsilon import visualization
-except Exception as e:
-    viz_err = e
-    visualization = None
 
 # --- Page config ---
 def _resolve_icon():
@@ -38,25 +32,12 @@ def _resolve_icon():
 
 st.set_page_config(page_title="spec2epsilon", page_icon=_resolve_icon(), layout="wide")
 
-# --- Global MathJax (v2) for Plotly LaTeX once per session ---
-def enable_mathjax_once():
-    if st.session_state.get("_mathjax_loaded"):
-        return
-    components.html(
-        """
-        <script>
-          // Tell Plotly which MathJax to use
-          window.PlotlyConfig = window.PlotlyConfig || {};
-          window.PlotlyConfig.mathjax = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js';
-          window.PlotlyConfig.MathJaxConfig = 'TeX-AMS-MML_SVG';
-        </script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-AMS-MML_SVG"></script>
-        """,
-        height=0, width=0
-    )
-    st.session_state["_mathjax_loaded"] = True
-
-enable_mathjax_once()
+# MathJax loader (v2) for Plotly LaTeX
+js_path = os.path.join(os.path.dirname(__file__), "load-mathjax.js")
+if os.path.exists(js_path):
+    with open(js_path, "r", encoding="utf-8") as f:
+        js = f.read()
+    components.html(f"<script>{js}</script>", height=0)
 
 st.markdown("<h1 style='margin-bottom:0'>spec2epsilon</h1>", unsafe_allow_html=True)
 st.caption("Estimate solvent dielectric constants from fluorescence spectra")
@@ -66,7 +47,7 @@ with st.sidebar:
     st.subheader("How to use")
     st.write(
         "- Upload one or more CSV files.\n"
-        "- Required columns: `Solvent/solvent`, `epsilon`, `nr`, plus 1+ molecule columns (eV or nm).\n"
+        "- Required columns: `Solvent/solvent`, `epsilon`, `nr`, plus 1+ column with molecule's emission energy (eV or nm).\n"
         "- Empty `epsilon` cells can be inferred when a fit is available.\n"
         "- Review & edit data in the **Data** tab.\n"
         "- Choose solvents per molecule in **Selections**."
@@ -81,20 +62,8 @@ with st.sidebar:
         "Film1,,1.60,440,465\n",
         language="csv",
     )
-if viz_err is not None:
-    st.warning(
-        "Could not import `spec2epsilon.visualization`.\n"
-        "Install it or ensure it's on PYTHONPATH.\n\n"
-        f"Error: `{viz_err}`"
-    )
 
 # --- Helpers ---
-def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure 'Solvent' capitalization for downstream code."""
-    cols = {c: c for c in df.columns}
-    if "solvent" in df.columns and "Solvent" not in df.columns:
-        cols["solvent"] = "Solvent"
-    return df.rename(columns=cols)
 
 def _load_csv_files(uploaded_files) -> List[pd.DataFrame]:
     """Load each CSV via visualization.load_data (preferred) or pandas.read_csv; attach .name."""
@@ -102,12 +71,7 @@ def _load_csv_files(uploaded_files) -> List[pd.DataFrame]:
     for uf in uploaded_files:
         raw = uf.getvalue()
         bio = io.BytesIO(raw)
-        if visualization is not None and hasattr(visualization, "load_data"):
-            data = visualization.load_data(bio)
-        else:
-            bio.seek(0)
-            data = pd.read_csv(bio)
-        data = _normalize_columns(data)
+        data = visualization.load_data(bio)
         data.name = os.path.splitext(os.path.basename(uf.name))[0]
         datas.append(data)
     return datas
@@ -167,7 +131,6 @@ with TAB_DATA:
             width='stretch',
             key=f"editor_{getattr(df, 'name', str(idx))}",
         )
-        edited = _normalize_columns(edited)
         edited.name = getattr(df, "name", f"File {idx+1}")
         edited_datas.append(edited)
 
@@ -366,8 +329,8 @@ with TAB_RES:
             "format": "png",        # png | svg | jpeg | webp
             "filename": "correlation",  # updated per fig below
             "width": 1000,          # ~single-column @ 300dpi ≈ 1000 px
-            "height": 700,
-            "scale": 1              # keep fonts consistent
+            "height": 625,
+            "scale": 2              # keep fonts consistent
         }
     }
     st.plotly_chart(fig_corr, width='stretch', config=dl_config)
@@ -376,9 +339,9 @@ with TAB_RES:
         "toImageButtonOptions": {
             "format": "png",
             "filename": "residuals",
-            "width": 1000,
-            "height": 700,
-            "scale": 1
+            "width": 100,
+            "height": 625,
+            "scale": 2
         }
     }
     st.plotly_chart(fig_res, width='stretch', config=dl_config_res)
