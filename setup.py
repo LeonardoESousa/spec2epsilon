@@ -20,7 +20,7 @@ AUTHOR = 'Leonardo Evaristo de Sousa'
 REQUIRES_PYTHON = '>=3.8.0'
 
 # What packages are required for this module to be executed?
-REQUIRED = ['matplotlib==3.9.0', 'pandas==1.5.3', 'numpy==1.26.4','scipy', 'streamlit']
+REQUIRED = ['pandas==1.5.3', 'numpy==1.26.4','scipy', 'streamlit[charts]']
 
 # What packages are optional?
 EXTRAS = {

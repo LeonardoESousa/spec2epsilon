@@ -1,33 +1,6 @@
-
 # app.py
 # ---
-# A Streamlit app.
-# Functionality:
-# - Upload one or more CSV "ensemble" files
-# - Choose which solvents to include per molecule
-# - Fit and visualize correlations using functions from spec2epsilon.visualization
-# - Show residuals, properties table, and (if epsilon is missing) inferred dielectric tables
-# - Download the current plot as a high-resolution PNG
-#
-# NOTES
-# - This app expects the package `spec2epsilon` to be importable and to provide:
-#     visualization.load_data, visualization.characterize, visualization.model,
-#     visualization.format_number, visualization.compute_dielectric, visualization.set_fontsize (optional)
-# - If "dashstyle.mplstyle" exists in the working directory, it will be applied to matplotlib.
-# - If "./figs/favicon.ico" exists, it will be used as page icon.
-#
-# Run locally:
-#   pip install streamlit matplotlib numpy pandas
-#   # plus your package that provides `spec2epsilon`
-#   streamlit run app.py
-#
-# File format expectations:
-#   Each CSV should include columns:
-#     - 'Solvent' (or 'solvent')
-#     - 'epsilon' (may contain NaNs for inference mode)
-#     - 'nr'      (refractive index)
-#     - one or more molecule columns with emission energies (in eV) or wavelengths (>100 assumed nm, auto-converted to eV)
-# ---
+# A Streamlit app with Plotly + MathJax enabled globally.
 
 import io
 import os
@@ -38,9 +11,11 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
-import matplotlib as mpl
-mpl.use("Agg")
-import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
+
+# Plotly
+import plotly.graph_objects as go
+import plotly.express as px
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 pd.options.mode.chained_assignment = None
@@ -55,7 +30,6 @@ except Exception as e:
 
 # --- Page config ---
 def _resolve_icon():
-    # Prefer local favicon if available; fallback to emoji
     candidates = ["./figs/favicon.ico", "figs/favicon.ico"]
     for path in candidates:
         if os.path.exists(path):
@@ -66,18 +40,15 @@ st.set_page_config(
     page_title="spec2epsilon",
     page_icon=_resolve_icon(),
     layout="wide"
-)
+)   
+
+js_path = os.path.join(os.path.dirname(__file__), "load-mathjax.js")
+with open(js_path, "r") as f:
+    js = f.read()
+    st.components.v1.html(f"<script>{js}</script>", height=0)
 
 st.markdown("<h1 style='margin-bottom:0'>spec2epsilon</h1>", unsafe_allow_html=True)
 st.caption("Estimate solvent dielectric constants from fluorescence spectra")
-
-# --- Apply custom matplotlib style if present ---
-mplstyle = os.path.join(os.getcwd(), "dashstyle.mplstyle")
-if os.path.exists(mplstyle):
-    try:
-        plt.style.use([mplstyle])
-    except Exception:
-        pass
 
 # --- Sidebar: About ---
 with st.sidebar:
@@ -103,8 +74,6 @@ Film2,1.6000,,440,460,465
         language="csv"
     )
 
-    
-    
 if viz_err is not None:
     st.warning(
         "Could not import `spec2epsilon.visualization`. "
@@ -114,14 +83,12 @@ if viz_err is not None:
 # --- Helpers ---
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     cols = {c: c for c in df.columns}
-    # Unify "solvent" -> "Solvent"
     if "solvent" in df.columns and "Solvent" not in df.columns:
         cols["solvent"] = "Solvent"
     df = df.rename(columns=cols)
     return df
 
 def _load_csv_files(uploaded_files) -> List[pd.DataFrame]:
-    """Use visualization.load_data."""
     datas = []
     for uf in uploaded_files:
         name = uf.name
@@ -129,12 +96,8 @@ def _load_csv_files(uploaded_files) -> List[pd.DataFrame]:
         bio = io.BytesIO(raw)
         data = visualization.load_data(bio)
         data = _normalize_columns(data)
-
-        # Convert emissions in nm (>100) to eV (1240/nm) for molecule columns
-        # Keep 'Solvent', 'epsilon', 'nr' unchanged.
         for col in data.columns:
             if col not in ["Solvent", "epsilon", "nr"]:
-                # Coerce to float
                 def _to_ev(x):
                     try:
                         val = float(x)
@@ -150,7 +113,6 @@ def _collect_molecules(datas: List[pd.DataFrame]) -> List[str]:
     molecules = []
     for df in datas:
         molecules.extend([c for c in df.columns if c not in ["Solvent", "epsilon", "nr", "solvent"]])
-    # Keep order but unique
     seen = set()
     uniq = []
     for m in molecules:
@@ -164,7 +126,6 @@ def _collect_solvents_for_molecule(datas: List[pd.DataFrame], molecule: str) -> 
     for df in datas:
         if "Solvent" in df.columns and molecule in df.columns:
             sv.extend(df["Solvent"].dropna().astype(str).unique().tolist())
-    # unique preserve order
     seen = set()
     uniq = []
     for s in sv:
@@ -190,25 +151,23 @@ if len(datas) == 0:
     st.error("No data could be loaded from the uploaded files.")
     st.stop()
 
-# Determine molecules across all data
 all_molecules = _collect_molecules(datas)
 if len(all_molecules) == 0:
-    st.error("No molecule columns found. Ensure your CSVs include one or more molecule emission columns.")
+    st.error("No molecule columns found.")
     st.stop()
 
 # Configure solvent selections per molecule
 st.subheader("Selections")
 with st.expander("Solvents", expanded=True):
     selections: Dict[str, List[str]] = {}
-    ncols = min(3, max(1, len(all_molecules)))  # up to 3 columns for controls
-    # chunk molecules to distribute in columns
+    ncols = min(3, max(1, len(all_molecules)))
     chunks = [all_molecules[i::ncols] for i in range(ncols)]
     cols = st.columns(ncols)
     for col, mols in zip(cols, chunks):
         with col:
             for mol in mols:
                 options = _collect_solvents_for_molecule(datas, mol)
-                default = options[:]  # all by default
+                default = options[:]
                 selections[mol] = st.multiselect(
                     f"{mol}",
                     options=options,
@@ -218,29 +177,31 @@ with st.expander("Solvents", expanded=True):
 
 # --- Analysis and plotting ---
 st.subheader("Characterization")
-fig, ax = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
-ax0, ax1 = ax
 
 fits: Dict[str, Tuple[Tuple[float, float], np.ndarray]] = {}
-stats_rows = []  # [molecule, e_vac_fmt, chi_fmt]
+stats_rows = []
 inference_tables: Dict[str, pd.DataFrame] = {}
 
-# Plot each molecule across each dataset
+palette = px.colors.qualitative.Plotly
+if len(all_molecules) > len(palette):
+    extra = px.colors.qualitative.Safe + px.colors.qualitative.Vivid + px.colors.qualitative.Set3
+    palette = (palette + extra) * ((len(all_molecules) // len(palette)) + 1)
+color_map: Dict[str, str] = {m: palette[i] for i, m in enumerate(all_molecules)}
+
+fig_corr = go.Figure()  
+fig_res = go.Figure()   
+
 for df in datas:
-    # Pre-check for core columns
     if not set(["Solvent", "epsilon", "nr"]).issubset(df.columns):
-        st.warning(f"File `{getattr(df, 'name', 'unknown')}` is missing one of the required columns: Solvent, epsilon, nr. Skipping.")
+        st.warning(f"File `{getattr(df, 'name', 'unknown')}` is missing required columns. Skipping.")
         continue
 
     for molecule in [c for c in df.columns if c not in ["Solvent", "epsilon", "nr", "solvent"]]:
-        # Respect user's solvent selections for this molecule
         allowed_solvents = selections.get(molecule, [])
         if len(allowed_solvents) == 0:
             continue
 
         data_mol = df[df["Solvent"].astype(str).isin(allowed_solvents)].copy()
-
-        # Skip if insufficient valid data
         if data_mol.empty:
             continue
 
@@ -248,7 +209,6 @@ for df in datas:
         nr = data_mol["nr"].to_numpy(dtype=float)
         emission = data_mol[molecule].to_numpy(dtype=float)
 
-        # Only fit when we have at least 3 points and all needed columns are finite
         mask = np.isfinite(epsilons) & np.isfinite(nr) & np.isfinite(emission)
         if mask.sum() < 3:
             continue
@@ -258,20 +218,60 @@ for df in datas:
         emission_fit = emission[mask]
 
         opt, cov = visualization.characterize((alphas_st, alphas_opt), emission_fit)
-        chi, e_vac = opt  # follows notebook convention
+        chi, e_vac = opt
         fits[molecule] = (opt, cov)
 
-        # Model and plotting
         function = visualization.model((alphas_st, alphas_opt), chi, e_vac)
-        
         x = 2 * alphas_st - alphas_opt
-        ax0.plot(x, function, label=molecule)
-        ax0.scatter(x, emission_fit, s=20)
 
-        # Residuals
-        ax1.scatter(x, emission_fit - function, marker="x", s=60, linewidths=1.5)
+        color = color_map[molecule]
 
-        # Stats row with uncertainties
+        solvents = data_mol["Solvent"].to_numpy()[mask]
+
+        fig_corr.add_trace(go.Scatter(
+            x=x, y=function,
+            mode="lines",
+            name=molecule,
+            legendgroup=molecule,
+            line=dict(color=color, width=2),
+            hovertemplate=(
+                "<b>%{fullData.name}</b><br>"
+                "Solvent=%{customdata}<br>"
+                "x=%{x:.3f}<br>Model (eV)=%{y:.3f}<extra></extra>"
+            ),
+            customdata=solvents
+        ))
+        fig_corr.add_trace(go.Scatter(
+            x=x, y=emission_fit,
+            mode="markers",
+            name=molecule + " (obs)",
+            legendgroup=molecule,
+            showlegend=False,
+            marker=dict(color=color, size=7, line=dict(color=color, width=0.5)),
+            hovertemplate=(
+                "<b>%{fullData.name}</b><br>"
+                "Solvent=%{customdata}<br>"
+                "x=%{x:.3f}<br>Emission =%{y:.3f} eV<extra></extra>"
+            ),
+            customdata=solvents
+        ))
+
+        residuals = emission_fit - function
+        fig_res.add_trace(go.Scatter(
+            x=x, y=residuals,
+            mode="markers",
+            name=molecule,
+            legendgroup=molecule,
+            showlegend=True,
+            marker=dict(color=color, size=9),
+            hovertemplate=(
+                "<b>%{fullData.name}</b><br>"
+                "Solvent=%{customdata}<br>"
+                "x=%{x:.3f}<br>Residual (eV)=%{y:.3f}<extra></extra>"
+            ),
+            customdata=solvents
+        ))
+
         error = np.sqrt(np.diag(cov)) if cov is not None else np.array([np.nan, np.nan])
         if hasattr(visualization, "format_number"):
             chi_fmt = visualization.format_number(chi, error[0], "")
@@ -281,23 +281,19 @@ for df in datas:
             e_vac_fmt = f"{e_vac:.3f} ± {error[1]:.3f}" if np.isfinite(error[1]) else f"{e_vac:.3f}"
         stats_rows.append([molecule, e_vac_fmt, chi_fmt])
 
-    # Inference block (epsilon NaNs)
     if df["epsilon"].isna().any() and len(fits) > 0 and hasattr(visualization, "compute_dielectric"):
         inference = df[df["epsilon"].isna()].copy()
         if not inference.empty:
             for molecule in [c for c in df.columns if c not in ["Solvent", "epsilon", "nr", "solvent"]]:
                 if molecule not in fits:
-                    # need a prior fit for this molecule; skip if not yet fitted
                     continue
                 rows = []
                 for film in inference["Solvent"].dropna().astype(str).unique().tolist():
                     sub = inference[inference["Solvent"].astype(str) == film]
                     emi = sub[molecule].to_numpy(dtype=float)
                     nrs = sub["nr"].to_numpy(dtype=float)
-
                     if len(emi) == 0 or not np.isfinite(emi[0]):
                         continue
-
                     median, lower, upper = visualization.compute_dielectric(emi, fits[molecule], nr=nrs)
                     rows.append([
                         film,
@@ -309,53 +305,67 @@ for df in datas:
                 if rows:
                     df_inf = pd.DataFrame(rows, columns=["Film", "Emission (eV)", "Emission (nm)", "ε", "Interval"])
                     df_inf = df_inf.sort_values(by="ε", ascending=True, kind="mergesort")
-                    #format Emission
                     df_inf["Emission (eV)"] = df_inf["Emission (eV)"].apply(lambda x: f"{x:.2f}")
                     df_inf["ε"] = df_inf["ε"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "∞")
                     inference_tables[molecule] = df_inf
 
-# Finalize axes
-ax0.set_xlabel(r"$2\alpha_{st} - \alpha_{opt}$")
-ax0.set_ylabel("Energy (eV)")
-ax0.set_title("a)", loc="left")
-# add legend only if items present
-if len(ax0.get_lines()) > 0:
-    ax0.legend(loc="best")
+if len(fig_corr.data) > 0:
+    fig_corr.update_layout(xaxis_title=r"$2 \alpha_{st} - \alpha_{opt}$", yaxis_title="Energy (eV)",legend=dict(
+        font=dict(size=16)), margin=dict(l=20, r=20, t=20, b=20)
+    )
+    # Enforce font sizes even if something overrides template
+    fig_corr.update_xaxes(title_font=dict(size=20), tickfont=dict(size=14))
+    fig_corr.update_yaxes(title_font=dict(size=20), tickfont=dict(size=14))
+if len(fig_res.data) > 0:
+    fig_res.update_layout(xaxis_title=r"$2 \alpha_{st} - \alpha_{opt}$", yaxis_title="Residuals (eV)", legend=dict(
+        font=dict(size=16)), margin=dict(l=20, r=20, t=20, b=20)
+    )
+    # Enforce font sizes even if something overrides template
+    fig_res.update_xaxes(title_font=dict(size=20), tickfont=dict(size=14))
+    fig_res.update_yaxes(title_font=dict(size=20), tickfont=dict(size=14))
 
-ax1.set_xlabel(r"$2\alpha_{st} - \alpha_{opt}$")
-ax1.set_ylabel("Residuals (eV)")
-ax1.set_title("b)", loc="left")
-
-st.pyplot(fig, width='stretch')
-
-# Download figure
-buf = io.BytesIO()
-fig.savefig(buf, format="png", dpi=600)
-st.download_button(
-    "Download PNG (600 dpi)",
-    data=buf.getvalue(),
-    file_name="susceptibilities.png",
-    mime="image/png",
-    help="Save the current plot as a high-resolution PNG"
+# Correlation figure
+st.plotly_chart(
+    fig_corr,
+    use_container_width=True,
+    config={
+        "toImageButtonOptions": {
+            "format": "png",      # png | svg | jpeg | webp
+            "filename": "correlation",
+            'width': None,
+            'height': None,
+            'scale': 2
+        }
+    }
 )
 
+# Residuals figure
+st.plotly_chart(
+    fig_res,
+    use_container_width=True,
+    config={
+        "toImageButtonOptions": {
+            "format": "png",
+            "filename": "residuals",
+            "height": None,
+            "width": None,
+            "scale": 2
+        }
+    }
+)
 
-# Properties (stats) table
 if stats_rows:
     stats_df = pd.DataFrame(stats_rows, columns=["Molecule", "<E_vac> (eV)", "<χ> (eV)"])
     stats_df = stats_df.sort_values(by="<χ> (eV)", key=lambda s: s.astype(str), ascending=False, kind="mergesort")
-    #remove index
     stats_df = stats_df.reset_index(drop=True)
     st.dataframe(stats_df, width='stretch')
 else:
     st.info("No stats to display yet (need ≥3 valid points per molecule to fit).")
 
-# Inference tables: display side-by-side
 if len(inference_tables) > 0:
     st.subheader("**Inferred ε**")
     num = len(inference_tables)
     max_cols = min(3, num)
-    # chunk into rows of up to 3 columns
     mol_keys = list(inference_tables.keys())
     for i in range(0, num, max_cols):
         cols = st.columns(min(max_cols, num - i))
