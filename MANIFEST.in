@@ -1,2 +1,2 @@
 include README.md LICENSE
-include spec2epsilon/*mplstyle
+include spec2epsilon/*js
