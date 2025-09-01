@@ -66,11 +66,11 @@ with st.sidebar:
     st.subheader("How to use")
     st.write(
         "- Upload one or more CSV files.\n"
+        "- Required columns: `Solvent/solvent`, `epsilon`, `nr`, plus 1+ molecule columns (eV or nm).\n"
+        "- Empty `epsilon` cells can be inferred when a fit is available.\n"
         "- Review & edit data in the **Data** tab.\n"
-        "- Choose solvents per molecule in **Results → Selections**.\n"
-        "- View plots & tables in **Results**.\n"
-        "- Required columns: `Solvent/solvent`, `epsilon`, `nr`, plus 1+ molecule columns (eV or nm; `load_data()` handles conversion).\n"
-        "- Empty `epsilon` cells can be inferred when a fit is available."
+        "- Choose solvents per molecule in **Selections**."
+        
     )
     st.markdown("**Example CSV format:**")
     st.code(
@@ -164,7 +164,7 @@ with TAB_DATA:
         edited = st.data_editor(
             df,
             num_rows="dynamic",
-            use_container_width=True,
+            width='stretch',
             key=f"editor_{getattr(df, 'name', str(idx))}",
         )
         edited = _normalize_columns(edited)
@@ -327,14 +327,16 @@ with TAB_RES:
                             film,
                             emi[0],
                             f"{1240.0/emi[0]:.0f}" if emi[0] != 0 else "∞",
+                            nrs[0],
                             median,
                             f"[{lower:.2f} , {upper:.2f}]"
                         ])
                     if rows:
-                        df_inf = pd.DataFrame(rows, columns=["Film", "Emission (eV)", "Emission (nm)", "ε", "Interval"])
+                        df_inf = pd.DataFrame(rows, columns=["Film", "Emission (eV)", "Emission (nm)", "nr", "ε", "Interval"])
                         df_inf = df_inf.sort_values(by="ε", ascending=True, kind="mergesort")
                         df_inf["Emission (eV)"] = df_inf["Emission (eV)"].apply(lambda x: f"{x:.2f}")
                         df_inf["ε"] = df_inf["ε"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "∞")
+                        df_inf["nr"] = df_inf["nr"].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "∞")
                         inference_tables[molecule] = df_inf
 
     # Tight-ish layout and readable fonts
@@ -368,7 +370,7 @@ with TAB_RES:
             "scale": 1              # keep fonts consistent
         }
     }
-    st.plotly_chart(fig_corr, use_container_width=True, config=dl_config)
+    st.plotly_chart(fig_corr, width='stretch', config=dl_config)
 
     dl_config_res = {
         "toImageButtonOptions": {
@@ -379,11 +381,11 @@ with TAB_RES:
             "scale": 1
         }
     }
-    st.plotly_chart(fig_res, use_container_width=True, config=dl_config_res)
+    st.plotly_chart(fig_res, width='stretch', config=dl_config_res)
 
     if stats_rows:
         stats_df = pd.DataFrame(stats_rows, columns=["Molecule", "<E_vac> (eV)", "<χ> (eV)"])
-        st.dataframe(stats_df, use_container_width=True)
+        st.dataframe(stats_df, width='stretch')
     else:
         st.info("No stats to display yet (need ≥3 valid points per molecule to fit).")
 
@@ -398,6 +400,6 @@ with TAB_RES:
             for c, k in zip(cols, keys[i:i+max_cols]):
                 with c:
                     st.caption(k)
-                    st.dataframe(inference_tables[k], use_container_width=True)
+                    st.dataframe(inference_tables[k], width='stretch')
     else:
         st.caption("No ε inference performed (no rows with missing `epsilon`).")
