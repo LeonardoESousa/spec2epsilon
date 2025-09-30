@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=69", "wheel", "build"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spec2epsilon"
+# version comes from spec2epsilon/__version__.py
+dynamic = ["version"]
+description = "Estimate dielectric constant from fluorescence spectra"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Leonardo Evaristo de Sousa", email = "ledso@dtu.dk" }]
+urls = { Homepage = "https://github.com/LeonardoESousa/spec2epsilon" }
+
+# Keep pandas <2.0 and NumPy <2.0 (works well on Python 3.8–3.11)
+dependencies = [
+  "numpy>=1.23,<2.0",
+  "pandas>=1.5,<2.0",
+  "scipy",
+  "streamlit[charts]"
+]
+
+[project.optional-dependencies]
+# dev = ["pytest", "ruff", "mypy"]
+
+[project.scripts]
+spec2epsilon = "spec2epsilon.__main__:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+exclude = ["tests", "*.tests", "*.tests.*", "tests.*"]
+
+[tool.setuptools.dynamic]
+# This points to the variable __version__ inside spec2epsilon/__version__.py
+version = { attr = "spec2epsilon.__version__.__version__" }

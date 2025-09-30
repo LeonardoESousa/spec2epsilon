@@ -8,7 +8,7 @@
 
 ## How to install it?
 
-`pip install git+https://github.com/LeonardoESousa/suscs`
+`pip install git+https://github.com/LeonardoESousa/spec2epsilon`
 
 ## How to use it?
 
