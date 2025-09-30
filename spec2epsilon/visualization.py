@@ -128,14 +128,12 @@ def compute_dielectric(films, fit, nr=1.4, num_samples=10000):
     num = e_vac_s[:, None] - films[None, :]  # shape (samples, films)
     den = 2 * chi_s[:, None]                 # shape (samples, 1)
     w   = num / den + alpha_opt[None, :] / 2
-    w   = np.clip(w, -1, 1)     # avoid division problems
+    # Enforce physical constraints (w must be in (alpha_opt, 1) )
+    w = np.where(w < alpha_opt[None, :], np.nan, w)
+    w = np.where(w > 1, np.nan, w)
 
     # Compute ε
     eps = (1 + w) / (1 - w)
-
-    # Filter out ε < nr² and optionally cap ε
-    min_eps = nr**2
-    eps = np.where(eps >= min_eps, eps, np.nan)
     
     # Compute statistics (ignoring NaN)
     median = np.nanmedian(eps, axis=0)
@@ -146,6 +144,7 @@ def compute_dielectric(films, fit, nr=1.4, num_samples=10000):
     if median.size == 1:
         return median.item(), lower.item(), upper.item()
     return median, lower, upper
+
 
 
 def dielectric(data, film, molecule, opt, cov):
