@@ -9,7 +9,7 @@ dynamic = ["version"]
 description = "Estimate dielectric constant from fluorescence spectra"
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Leonardo Evaristo de Sousa", email = "ledso@dtu.dk" }]
 urls = { Homepage = "https://github.com/LeonardoESousa/spec2epsilon" }
 
@@ -31,6 +31,8 @@ spec2epsilon = "spec2epsilon.__main__:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
+where = ["."]
+include = ["spec2epsilon*"]
 exclude = ["tests", "*.tests", "*.tests.*", "tests.*"]
 
 [tool.setuptools.dynamic]
