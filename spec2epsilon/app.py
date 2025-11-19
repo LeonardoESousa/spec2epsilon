@@ -213,6 +213,11 @@ with TAB_RES:
             function = visualization.model((alphas_st, alphas_opt), chi, e_vac)
             x = 2 * alphas_st - alphas_opt
 
+            #Compute R^2
+            ss_res = np.sum((emission_fit - function) ** 2)
+            ss_tot = np.sum((emission_fit - np.mean(emission_fit)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot)
+
             color = color_map[molecule]
             solvents = data_mol["Solvent"].to_numpy()[mask]
 
@@ -269,7 +274,8 @@ with TAB_RES:
             else:
                 chi_fmt = f"{chi:.3f} ± {error[0]:.3f}" if np.isfinite(error[0]) else f"{chi:.3f}"
                 e_vac_fmt = f"{e_vac:.3f} ± {error[1]:.3f}" if np.isfinite(error[1]) else f"{e_vac:.3f}"
-            stats_rows.append([molecule, e_vac_fmt, chi_fmt])
+            r_squared_fmt = f"{r_squared:.2f}"    
+            stats_rows.append([molecule, e_vac_fmt, chi_fmt, r_squared_fmt])
 
         # ε inference (rows with missing epsilon)
         if "epsilon" in df.columns and df["epsilon"].isna().any() and fits and hasattr(visualization, "compute_dielectric"):
@@ -347,7 +353,7 @@ with TAB_RES:
     st.plotly_chart(fig_res, width='stretch', config=dl_config_res)
 
     if stats_rows:
-        stats_df = pd.DataFrame(stats_rows, columns=["Molecule", "<E_vac> (eV)", "<χ> (eV)"])
+        stats_df = pd.DataFrame(stats_rows, columns=["Molecule", "<E_vac> (eV)", "<χ> (eV)", "R²"])
         st.dataframe(stats_df, width='stretch')
     else:
         st.info("No stats to display yet (need ≥3 valid points per molecule to fit).")

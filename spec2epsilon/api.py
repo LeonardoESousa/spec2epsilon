@@ -2,13 +2,15 @@
 import numpy as np
 import pandas as pd
 
-from .visualization import load_data, characterize, dielectric
+from .visualization import load_data, characterize, dielectric, confidence_ellipse
 
 
 def analysis(
     file,
     epsilon_col="epsilon",
     nr_col="nr",
+    ellipse=False,
+    ignore_list=[]
 ):
     """
     End-to-end (no plotting):
@@ -36,6 +38,9 @@ def analysis(
         solvent_col = "Solvent"
     else:
         raise ValueError("No solvent column found (expected 'solvent' or 'Solvent').")
+    # Remove ignored solvents
+    for ignore in ignore_list:
+        df = df[~df[solvent_col].str.lower().str.contains(ignore.lower(), na=False)]
 
     required = {epsilon_col, nr_col, solvent_col}
     missing = required - set(df.columns)
@@ -51,13 +56,14 @@ def analysis(
     summary_rows = []
     fits_rows = []
     plot_rows = []
+    ellipse_curves = {}
 
     # Precompute arrays for regressors (known points only)
     eps_all = df[epsilon_col].to_numpy()
     nr_all = df[nr_col].to_numpy()
     mask_known = (~np.isnan(eps_all)) & (~np.isnan(nr_all))
 
-    if mask_known.sum() < 2:
+    if mask_known.sum() <= 2:
         raise ValueError("Not enough rows with known epsilon & nr to perform fits.")
 
     eps_known = eps_all[mask_known]
@@ -69,6 +75,7 @@ def analysis(
     # Also keep the solvent labels for the known rows
     solvents_known = df.loc[mask_known, solvent_col].to_numpy()
 
+ 
     for mol in molecules:
         # Use only rows where emission for this molecule is present + regressors known
         y_col = df[mol].to_numpy()
@@ -90,21 +97,37 @@ def analysis(
         opt, cov = characterize((alphas_st_m, alphas_opt_m), y_fit)
         chi, e_vac = opt
         err = np.sqrt(np.diag(cov))
+
+        if ellipse:
+            #confidence ellipse
+            ellipse_curve = confidence_ellipse((opt, cov), confidence=0.68, num_points=200)
+            ellipse_curves[mol] = ellipse_curve
+
+        # get R²
+        y_mean = np.mean(y_fit)
+        ss_tot = np.sum((y_fit - y_mean) ** 2)
+        y_pred = e_vac - chi * x_mol
+        residuals = (y_fit - y_pred)
+        ss_res = np.sum(residuals ** 2)
+        r_squared = 1 - (ss_res / ss_tot)
+
         fits_rows.append({
             "molecule": mol,
             "E_vac": float(e_vac),
             "E_vac_err": float(err[1]),
             "chi": float(chi),
             "chi_err": float(err[0]),
+            "R2": float(r_squared),
         })
 
         # Collect plotting rows: emission vs x for this molecule
-        for s, x_val, y_val in zip(solvents_m, x_mol, y_fit):
+        for s, x_val, y_val, res_val in zip(solvents_m, x_mol, y_fit, residuals):
             plot_rows.append({
                 "molecule": mol,
                 "solvent": s,
                 "x": float(x_val),
                 "emission": float(y_val),
+                "residual": float(res_val),
             })
 
         # For every solvent needing epsilon, estimate ε for this molecule
@@ -127,12 +150,19 @@ def analysis(
                     "epsilon_lower": np.nan,
                     "epsilon_upper": np.nan,
                 })
-
-    summary = (
-        pd.DataFrame(summary_rows)
-        .sort_values(["epsilon_median", "solvent", "molecule"], na_position="last")
-        .reset_index(drop=True)
-    )
-    fits_df = pd.DataFrame(fits_rows).set_index("molecule")[["E_vac", "E_vac_err", "chi", "chi_err"]]
-    plot_data = pd.DataFrame(plot_rows).sort_values(["molecule", "solvent"]).reset_index(drop=True)
-    return summary, fits_df, plot_data
+    if len(need_eps) != 0:
+        summary = (
+            pd.DataFrame(summary_rows)
+            .sort_values(["epsilon_median", "solvent", "molecule"], na_position="last")
+            .reset_index(drop=True)
+        )
+    else:
+        summary = pd.DataFrame(
+            columns=["solvent", "molecule", "epsilon_median", "epsilon_lower", "epsilon_upper"]
+        )
+    fits_df = pd.DataFrame(fits_rows)[["molecule","E_vac", "E_vac_err", "chi", "chi_err", "R2"]]
+    plot_data = pd.DataFrame(plot_rows).sort_values(["molecule", "x"]).reset_index(drop=True)
+    if ellipse:
+        return summary, fits_df, plot_data, ellipse_curves
+    else:
+        return summary, fits_df, plot_data

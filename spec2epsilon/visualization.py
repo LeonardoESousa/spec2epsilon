@@ -50,7 +50,7 @@ def format_number(rate, error_rate, unit="s^-1"):
 ###############################################################
 
 def load_data(file):
-    data = pd.read_csv(file, skipinitialspace=True)  # trims spaces right after commas
+    data = pd.read_csv(file, skipinitialspace=True, comment='#', skip_blank_lines=True)  # trims spaces right after commas
     data.columns = data.columns.str.strip()
     cols = {c: c for c in data.columns}
     if "solvent" in data.columns and "Solvent" not in data.columns:
@@ -156,21 +156,17 @@ def dielectric(data, film, molecule, opt, cov):
     return median, lower, upper
 
 
-def plot_confidence_ellipse(fit, ax, confidence=0.68, num_points=200, **kwargs):
+def confidence_ellipse(fit, confidence=0.68, num_points=50):
     """
     Plot a confidence ellipse using a scatter plot, based on (mean, cov).
 
     Parameters:
         fit : tuple
             (mean, covariance matrix), with 2D mean and 2x2 cov matrix.
-        ax : matplotlib.axes.Axes
-            Axis object to draw the ellipse in.
         confidence : float
             Confidence level (default: 0.68 for 1σ).
         num_points : int
             Number of points to sample around the ellipse.
-        **kwargs :
-            Additional keyword arguments passed to ax.plot (e.g., color, linestyle).
     
     Returns:
         Line2D object from ax.plot
@@ -193,4 +189,4 @@ def plot_confidence_ellipse(fit, ax, confidence=0.68, num_points=200, **kwargs):
     ellipse = mean[:, None] + radius * np.linalg.cholesky(cov) @ circle
 
     # Plot as line
-    return ax.plot(ellipse[0], ellipse[1], **kwargs)
+    return ellipse
