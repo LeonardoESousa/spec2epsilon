@@ -2,9 +2,13 @@
 
 
 [![made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg?style=plastic)](https://www.python.org/)
-[![maint](https://img.shields.io/maintenance/yes/2025?style=plastic)]()
+[![maint](https://img.shields.io/maintenance/yes/2026?style=plastic)]()
 [![commit](https://img.shields.io/github/last-commit/LeonardoESousa/suscs?style=plastic)]()
 
+
+## Cite as
+
+[Bueno, Fernando Teixeira, Pedro Henrique de Oliveira Neto, and Leonardo Evaristo de Sousa. "Determining Static Dielectric Constants from Fluorescence Spectra." The Journal of Physical Chemistry Letters (2026).](https://doi.org/10.1021/acs.jpclett.5c03806)
 
 ## How to install it?
 

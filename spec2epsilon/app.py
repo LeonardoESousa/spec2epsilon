@@ -23,6 +23,7 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 pd.options.mode.chained_assignment = None
 
 
+
 # --- Page config ---
 def _resolve_icon():
     for path in ("./figs/favicon.ico", "figs/favicon.ico"):
@@ -31,26 +32,38 @@ def _resolve_icon():
     return "🧪"
 
 st.set_page_config(page_title="spec2epsilon", page_icon=_resolve_icon(), layout="wide")
+st.title("spec2epsilon")
 
-# MathJax loader (v2) for Plotly LaTeX
-js_path = os.path.join(os.path.dirname(__file__), "load-mathjax.js")
-if os.path.exists(js_path):
-    with open(js_path, "r", encoding="utf-8") as f:
-        js = f.read()
-    components.html(f"<script>{js}</script>", height=0)
+st.markdown(
+    "<p style='font-size:1.1rem; margin-top:0.1rem;'>Estimate solvent dielectric constants from fluorescence spectra</p>",
+    unsafe_allow_html=True,
+)
 
-st.markdown("<h1 style='margin-bottom:0'>spec2epsilon</h1>", unsafe_allow_html=True)
-st.caption("Estimate solvent dielectric constants from fluorescence spectra")
+# --- Upload ---
+uploaded = st.file_uploader(
+    "Upload one or more .csv files",
+    type=["csv"],
+    accept_multiple_files=True,
+    help="Columns: Solvent/solvent, epsilon, nr, and 1+ molecule emission columns (eV or nm).",
+)
+if not uploaded:
+    st.info("Upload CSV files to begin.")
+    st.stop()
+
+
+
 
 # --- Sidebar: About ---
 with st.sidebar:
+    st.subheader("Cite as")
+    st.write("Bueno, Fernando Teixeira, Pedro Henrique de Oliveira Neto, and Leonardo Evaristo de Sousa. 'Determining Static Dielectric Constants from Fluorescence Spectra.' The Journal of Physical Chemistry Letters (2026). DOI: https://doi.org/10.1021/acs.jpclett.5c03806")
     st.subheader("How to use")
     st.write(
         "- Upload one or more CSV files.\n"
         "- Required columns: `Solvent/solvent`, `epsilon`, `nr`, plus 1+ column with molecule's emission energy (eV or nm).\n"
         "- Empty `epsilon` cells can be inferred when a fit is available.\n"
         "- Review & edit data in the **Data** tab.\n"
-        "- Choose solvents per molecule in **Selections**."
+        "- Choose solvents per molecule in **Solvent Selection**."
         
     )
     st.markdown("**Example CSV format:**")
@@ -100,16 +113,30 @@ def _collect_solvents_for_molecule(datas: List[pd.DataFrame], molecule: str) -> 
             uniq.append(s)
     return uniq
 
-# --- Upload ---
-uploaded = st.file_uploader(
-    "Upload one or more .csv files",
-    type=["csv"],
-    accept_multiple_files=True,
-    help="Columns: Solvent/solvent, epsilon, nr, and 1+ molecule emission columns (eV or nm).",
-)
-if not uploaded:
-    st.info("Upload CSV files to begin.")
-    st.stop()
+def _collect_solvents_by_epsilon_validity(datas: List[pd.DataFrame]) -> Tuple[List[str], List[str]]:
+    """Return (finite_epsilon_solvents, nan_epsilon_solvents), preserving first-seen order."""
+    finite_seen, nan_seen = set(), set()
+    finite_solvents: List[str] = []
+    nan_solvents: List[str] = []
+
+    for df in datas:
+        if not set(["Solvent", "epsilon"]).issubset(df.columns):
+            continue
+
+        for _, row in df[["Solvent", "epsilon"]].dropna(subset=["Solvent"]).iterrows():
+            solvent = str(row["Solvent"])
+            epsilon = row["epsilon"]
+            if pd.isna(epsilon):
+                if solvent not in nan_seen:
+                    nan_seen.add(solvent)
+                    nan_solvents.append(solvent)
+            else:
+                if solvent not in finite_seen:
+                    finite_seen.add(solvent)
+                    finite_solvents.append(solvent)
+
+    return finite_solvents, nan_solvents
+
 
 raw_datas = _load_csv_files(uploaded)
 if not raw_datas:
@@ -137,6 +164,14 @@ with TAB_DATA:
 # Use edited data if present
 datas = edited_datas if edited_datas else raw_datas
 
+# MathJax loader (v2) for Plotly LaTeX
+js_path = os.path.join(os.path.dirname(__file__), "load-mathjax.js")
+if os.path.exists(js_path):
+    with open(js_path, "r", encoding="utf-8") as f:
+        js = f.read()
+    components.html(f"<script>{js}</script>", height=0)
+
+
 # --- RESULTS TAB ---
 with TAB_RES:
     st.subheader("Characterization")
@@ -145,20 +180,30 @@ with TAB_RES:
     if not all_molecules:
         st.error("No molecule columns found.")
         st.stop()
-
-    # Selections inside Results
-    with st.expander("Selections", expanded=True):
-        selections: Dict[str, List[str]] = {}
-        ncols = min(3, max(1, len(all_molecules)))
-        chunks = [all_molecules[i::ncols] for i in range(ncols)]
-        cols = st.columns(ncols)
-        for col, mols in zip(cols, chunks):
-            with col:
-                for mol in mols:
-                    options = _collect_solvents_for_molecule(datas, mol)
-                    selections[mol] = st.multiselect(
-                        f"{mol}", options=options, default=options[:], key=f"solv_{mol}"
-                    )
+    
+    finite_epsilon_solvents, nan_epsilon_solvents = _collect_solvents_by_epsilon_validity(datas)
+    auto_selected_nan_solvents = set(nan_epsilon_solvents)
+    finite_epsilon_solvents = sorted([
+        solv for solv in finite_epsilon_solvents
+        if solv not in auto_selected_nan_solvents
+    ])
+    
+    with st.expander("Solvent Selection", expanded=True):
+        selected_solvents = st.multiselect(
+            "Solvents",
+            options=finite_epsilon_solvents,
+            default=finite_epsilon_solvents,
+            key="global_solvents",
+        )
+    
+    # Build per-molecule selections from the single global selection
+    selections: Dict[str, List[str]] = {
+        mol: [
+            solv for solv in _collect_solvents_for_molecule(datas, mol)
+            if solv in selected_solvents or solv in auto_selected_nan_solvents
+        ]
+        for mol in all_molecules
+    }
 
     if visualization is None or not hasattr(visualization, "characterize") or not hasattr(visualization, "model"):
         st.error("`spec2epsilon.visualization` must provide `characterize` and `model` for fitting.")
@@ -318,7 +363,7 @@ with TAB_RES:
         )
         fig_corr.update_xaxes(title_font=dict(size=20), tickfont=dict(size=14), automargin=True)
         fig_corr.update_yaxes(title_font=dict(size=20), tickfont=dict(size=14), automargin=True)
-
+    
     if len(fig_res.data) > 0:
         fig_res.update_layout(
             xaxis_title=r"$2 \alpha_{st} - \alpha_{opt}$",
@@ -341,6 +386,13 @@ with TAB_RES:
     }
     st.plotly_chart(fig_corr, width='stretch', config=dl_config)
 
+    if stats_rows:
+        stats_df = pd.DataFrame(stats_rows, columns=["Molecule", "<E_vac> (eV)", "<χ> (eV)", "R²"])
+        st.dataframe(stats_df, width='stretch')
+    else:
+        st.info("No stats to display yet (need ≥3 valid points per molecule to fit).")
+
+
     dl_config_res = {
         "toImageButtonOptions": {
             "format": "png",
@@ -352,12 +404,7 @@ with TAB_RES:
     }
     st.plotly_chart(fig_res, width='stretch', config=dl_config_res)
 
-    if stats_rows:
-        stats_df = pd.DataFrame(stats_rows, columns=["Molecule", "<E_vac> (eV)", "<χ> (eV)", "R²"])
-        st.dataframe(stats_df, width='stretch')
-    else:
-        st.info("No stats to display yet (need ≥3 valid points per molecule to fit).")
-
+    
     # Inferred ε
     st.subheader("Inferred ε")
     
