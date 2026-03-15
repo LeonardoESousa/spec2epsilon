@@ -23,7 +23,10 @@ Once installed, use the command:
 The application will open in your browser.
 
 
-## Input file
+<img src="examples/figures/Picture4.png" alt="Alt Text" width="2000">
+
+
+## Input files
 
 The application requires a .csv file in the format shown below:
 
@@ -54,7 +57,20 @@ The **nr** column contains the refractive index of each sample.
 The **Molecule_name** column contains the peak of fluorescence spectra as measured in the different solvents/environments. Values may be provided in eV or nm. The column name should identify the molecule.
 It is also possible to include more than one **Molecule_name** column in the same file, allowing characterization or inference for multiple molecules in parallel.
 
-Examples of input files can be found in here [here](https://github.com/LeonardoESousa/spec2epsilon/tree/main/examples)
+Examples of input files can be found in here [here](https://github.com/LeonardoESousa/spec2epsilon/tree/main/examples). These files can be uploaded to the application.
+
+
+## Characterization and Inference
+
+<img src="examples/figures/Picture1.png" alt="Alt Text" width="2000">
+
+Once the csv files are uploaded, the application will fit the characterization data and show the computed values for the vacuum emission energy, the solvatochromic susceptibility and the $R^2$ of the fit. The list of selected solvents is shown on the top.
+
+
+Further below, inferred $\epsilon$ values for data points with no declared $\epsilon$ are shown along with their uncertainty interval.  In the data tab, input data can be edited as well. 
+
+<img src="examples/figures/Picture2.png" alt="Alt Text" width="2000">
+
+## Tutorial
 
 The csv file can be uploaded to the application. Alternatively, one may use the api. A tutorial is provided [here](https://github.com/LeonardoESousa/spec2epsilon/tree/main/examples/tutorial.ipynb).
-
