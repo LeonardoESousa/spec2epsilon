@@ -1,8 +1,71 @@
 # susc/api.py
+import io
+import re
+import zipfile
+from datetime import datetime, timezone
+
 import numpy as np
 import pandas as pd
 
 from .visualization import load_data, characterize, dielectric, confidence_ellipse
+
+
+def _uniquify_name(base_name, used_names):
+    if base_name not in used_names:
+        used_names.add(base_name)
+        return base_name
+
+    idx = 2
+    while True:
+        candidate = f"{base_name}_{idx}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        idx += 1
+
+
+def _build_fit_export_payload(fit_entries):
+    export_payload = {
+        "schema_version": 1,
+        "generated_utc": datetime.now(timezone.utc).isoformat(),
+        "molecules": [],
+    }
+
+    for row in fit_entries:
+        export_payload["molecules"].append({
+            "molecule": row["molecule"],
+            "E_vac": float(row["E_vac"]),
+            "chi": float(row["chi"]),
+            "covariance_matrix": row["covariance_matrix"],
+        })
+
+    return export_payload
+
+
+def _build_fit_zip_bytes(export_payload):
+    zip_buffer = io.BytesIO()
+    used_file_stems = set()
+    with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for fit_data in export_payload["molecules"]:
+            molecule = fit_data["molecule"]
+            # Keep molecule names readable while avoiding filesystem-invalid characters.
+            safe_base = re.sub(r"[^A-Za-z0-9._-]+", "_", molecule).strip("._") or "molecule"
+            safe_name = _uniquify_name(safe_base, used_file_stems)
+            mol_payload = {
+                "schema_version": export_payload["schema_version"],
+                "generated_utc": export_payload["generated_utc"],
+                "molecule": molecule,
+                "E_vac": fit_data["E_vac"],
+                "chi": fit_data["chi"],
+                "covariance_matrix": fit_data["covariance_matrix"],
+            }
+            mol_buffer = io.BytesIO()
+            np.save(mol_buffer, mol_payload, allow_pickle=True)
+            mol_buffer.seek(0)
+            zf.writestr(f"{safe_name}.npy", mol_buffer.getvalue())
+
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
 
 
 def analysis(
@@ -10,7 +73,8 @@ def analysis(
     epsilon_col="epsilon",
     nr_col="nr",
     ellipse=False,
-    ignore_list=[]
+    ignore_list=None,
+    download=False,
 ):
     """
     End-to-end (no plotting):
@@ -18,6 +82,12 @@ def analysis(
       - Fit χ & E_vac per molecule using rows with known epsilon & nr
       - Find all solvents whose epsilon is missing (NaN) -> those need epsilon
       - For each (molecule, solvent_needing_epsilon), estimate epsilon interval
+
+    Parameters
+    ----------
+    download : bool, default False
+        If True, writes `spec2epsilon_fit_results.zip` in the current working directory
+        with one `.npy` file per fitted molecule.
 
     Returns
     -------
@@ -30,6 +100,8 @@ def analysis(
         Columns: ["molecule", "solvent", "x", "emission"].
     """
     df = load_data(file).copy()
+    if ignore_list is None:
+        ignore_list = []
 
     # Handle solvent column name being either 'Solvent' or 'solvent'
     if "solvent" in df.columns:
@@ -118,6 +190,7 @@ def analysis(
             "chi": float(chi),
             "chi_err": float(err[0]),
             "R2": float(r_squared),
+            "covariance_matrix": cov.tolist() if cov is not None else None,
         })
 
         # Collect plotting rows: emission vs x for this molecule
@@ -162,6 +235,13 @@ def analysis(
         )
     fits_df = pd.DataFrame(fits_rows)[["molecule","E_vac", "E_vac_err", "chi", "chi_err", "R2"]]
     plot_data = pd.DataFrame(plot_rows).sort_values(["molecule", "x"]).reset_index(drop=True)
+
+    if download and not fits_df.empty:
+        export_payload = _build_fit_export_payload(fits_rows)
+        zip_bytes = _build_fit_zip_bytes(export_payload)
+        with open("spec2epsilon_fit_results.zip", "wb") as f:
+            f.write(zip_bytes)
+
     if ellipse:
         return summary, fits_df, plot_data, ellipse_curves
     else:

@@ -6,15 +6,23 @@
 # - Modebar download tuned for decent publication defaults
 
 import io
+import json
 import os
+import re
 import warnings
+import zipfile
+from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from typing import Dict, List, Tuple
+from urllib.error import URLError
+from urllib.request import urlopen
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from spec2epsilon import visualization
+from spec2epsilon.__version__ import __version__ as APP_VERSION
 
 import plotly.graph_objects as go
 import plotly.express as px
@@ -55,6 +63,58 @@ if not uploaded:
 
 # --- Sidebar: About ---
 with st.sidebar:
+    st.subheader("Software")
+    try:
+        local_version = pkg_version("spec2epsilon")
+    except PackageNotFoundError:
+        local_version = APP_VERSION
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _fetch_latest_pypi_version() -> Tuple[str, str]:
+        url = "https://pypi.org/pypi/spec2epsilon/json"
+        try:
+            with urlopen(url, timeout=3) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            latest = str(payload.get("info", {}).get("version", "")).strip()
+            if latest:
+                return latest, ""
+            return "", "Could not read version from PyPI response."
+        except URLError as exc:
+            reason = getattr(exc, "reason", "network error")
+            return "", f"Update check unavailable ({reason})."
+        except Exception as exc:
+            return "", f"Update check failed ({type(exc).__name__})."
+
+    def _version_tuple(raw: str) -> Tuple[int, ...]:
+        parts: List[int] = []
+        for token in raw.split("."):
+            digits = ""
+            for char in token:
+                if char.isdigit():
+                    digits += char
+                else:
+                    break
+            parts.append(int(digits) if digits else 0)
+        return tuple(parts)
+
+    def _is_newer(candidate: str, current: str) -> bool:
+        c1 = _version_tuple(candidate)
+        c2 = _version_tuple(current)
+        max_len = max(len(c1), len(c2))
+        c1 = c1 + (0,) * (max_len - len(c1))
+        c2 = c2 + (0,) * (max_len - len(c2))
+        return c1 > c2
+
+    st.write(f"Version: {local_version}")
+    latest_version, update_error = _fetch_latest_pypi_version()
+    if latest_version:
+        if _is_newer(latest_version, local_version):
+            st.warning(f"New version available: {latest_version}")
+        else:
+            st.success("You are using the latest available version.")
+    else:
+        st.caption(update_error)
+
     st.subheader("Cite as")
     st.write("Bueno, Fernando Teixeira, Pedro Henrique de Oliveira Neto, and Leonardo Evaristo de Sousa. 'Determining Static Dielectric Constants from Fluorescence Spectra.' The Journal of Physical Chemistry Letters (2026). DOI: https://doi.org/10.1021/acs.jpclett.5c03806")
     st.subheader("How to use")
@@ -138,6 +198,20 @@ def _collect_solvents_by_epsilon_validity(datas: List[pd.DataFrame]) -> Tuple[Li
     return finite_solvents, nan_solvents
 
 
+def _uniquify_name(base_name: str, used_names: set) -> str:
+    if base_name not in used_names:
+        used_names.add(base_name)
+        return base_name
+
+    idx = 2
+    while True:
+        candidate = f"{base_name}_{idx}"
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        idx += 1
+
+
 raw_datas = _load_csv_files(uploaded)
 if not raw_datas:
     st.error("No data could be loaded from the uploaded files.")
@@ -180,6 +254,17 @@ with TAB_RES:
     if not all_molecules:
         st.error("No molecule columns found.")
         st.stop()
+
+    selected_molecules = st.multiselect(
+        "Molecules",
+        options=all_molecules,
+        default=all_molecules,
+        key="selected_molecules",
+        help="Run fitting and plots only for selected molecules.",
+    )
+    if not selected_molecules:
+        st.warning("Select at least one molecule to run the analysis.")
+        st.stop()
     
     finite_epsilon_solvents, nan_epsilon_solvents = _collect_solvents_by_epsilon_validity(datas)
     auto_selected_nan_solvents = set(nan_epsilon_solvents)
@@ -202,7 +287,7 @@ with TAB_RES:
             solv for solv in _collect_solvents_for_molecule(datas, mol)
             if solv in selected_solvents or solv in auto_selected_nan_solvents
         ]
-        for mol in all_molecules
+        for mol in selected_molecules
     }
 
     if visualization is None or not hasattr(visualization, "characterize") or not hasattr(visualization, "model"):
@@ -210,19 +295,22 @@ with TAB_RES:
         st.stop()
 
     fits: Dict[str, Tuple[Tuple[float, float], np.ndarray]] = {}
+    fit_export_entries: List[Dict[str, object]] = []
     stats_rows: List[List[str]] = []
     inference_tables: Dict[str, pd.DataFrame] = {}
 
     # Color map for molecules
     palette = px.colors.qualitative.Plotly
-    if len(all_molecules) > len(palette):
+    if len(selected_molecules) > len(palette):
         extra = px.colors.qualitative.Safe + px.colors.qualitative.Vivid + px.colors.qualitative.Set3
-        palette = (palette + extra) * ((len(all_molecules) // len(palette)) + 1)
-    color_map: Dict[str, str] = {m: palette[i] for i, m in enumerate(all_molecules)}
+        palette = (palette + extra) * ((len(selected_molecules) // len(palette)) + 1)
+    color_map: Dict[str, str] = {m: palette[i] for i, m in enumerate(selected_molecules)}
 
     # Figures
     fig_corr = go.Figure()
     fig_res = go.Figure()
+    fig_chi_vac = go.Figure()
+    chi_vac_legend_seen = set()
 
     # Fit & plot
     for df in datas:
@@ -230,7 +318,7 @@ with TAB_RES:
             st.warning(f"File `{getattr(df, 'name', 'unknown')}` is missing required columns. Skipping.")
             continue
 
-        for molecule in [c for c in df.columns if c not in ["Solvent", "epsilon", "nr", "solvent"]]:
+        for molecule in [c for c in df.columns if c in selected_molecules]:
             allowed_solvents = selections.get(molecule, [])
             if not allowed_solvents:
                 continue
@@ -254,6 +342,13 @@ with TAB_RES:
             opt, cov = visualization.characterize((alphas_st, alphas_opt), emission_fit)
             chi, e_vac = opt
             fits[molecule] = (opt, cov)
+            fit_export_entries.append({
+                "molecule": molecule,
+                "E_vac": float(e_vac),
+                "chi": float(chi),
+                "covariance_matrix": cov.tolist() if cov is not None else None,
+            })
+            error = np.sqrt(np.diag(cov)) if cov is not None else np.array([np.nan, np.nan])
 
             function = visualization.model((alphas_st, alphas_opt), chi, e_vac)
             x = 2 * alphas_st - alphas_opt
@@ -311,8 +406,44 @@ with TAB_RES:
                 customdata=solvents
             ))
 
+            # Fitted parameter map: point + 68% uncertainty ellipse
+            show_legend = molecule not in chi_vac_legend_seen
+            chi_vac_legend_seen.add(molecule)
+            fig_chi_vac.add_trace(go.Scatter(
+                x=[chi], y=[e_vac],
+                mode="markers",
+                name=molecule,
+                legendgroup=molecule,
+                showlegend=show_legend,
+                marker=dict(color=color, size=9, line=dict(color=color, width=0.5)),
+                customdata=np.array([[error[0], error[1]]]),
+                hovertemplate=(
+                    "<b>%{fullData.name}</b><br>"
+                    "χ (eV)=%{x:.3f}<br>"
+                    "E_vac (eV)=%{y:.3f}<br>"
+                    "σχ=%{customdata[0]:.3f}<br>"
+                    "σE_vac=%{customdata[1]:.3f}<extra></extra>"
+                )
+            ))
+
+            if cov is not None and np.shape(cov) == (2, 2) and np.all(np.isfinite(cov)):
+                try:
+                    ellipse = visualization.confidence_ellipse(
+                        (np.array([chi, e_vac]), cov), confidence=0.68, num_points=200
+                    )
+                    fig_chi_vac.add_trace(go.Scatter(
+                        x=ellipse[0], y=ellipse[1],
+                        mode="lines",
+                        name=molecule + " (68% ellipse)",
+                        legendgroup=molecule,
+                        showlegend=False,
+                        line=dict(color=color, width=1.5),
+                        hoverinfo="skip",
+                    ))
+                except Exception:
+                    pass
+
             # Stats row
-            error = np.sqrt(np.diag(cov)) if cov is not None else np.array([np.nan, np.nan])
             if hasattr(visualization, "format_number"):
                 chi_fmt = visualization.format_number(chi, error[0], "")
                 e_vac_fmt = visualization.format_number(e_vac, error[1], "")
@@ -326,7 +457,7 @@ with TAB_RES:
         if "epsilon" in df.columns and df["epsilon"].isna().any() and fits and hasattr(visualization, "compute_dielectric"):
             inference = df[df["epsilon"].isna()].copy()
             if not inference.empty:
-                for molecule in [c for c in df.columns if c not in ["Solvent", "epsilon", "nr", "solvent"]]:
+                for molecule in [c for c in df.columns if c in selected_molecules]:
                     if molecule not in fits:
                         continue
                     rows = []
@@ -374,6 +505,16 @@ with TAB_RES:
         fig_res.update_xaxes(title_font=dict(size=20), tickfont=dict(size=14), automargin=True)
         fig_res.update_yaxes(title_font=dict(size=20), tickfont=dict(size=14), automargin=True)
 
+    if len(fig_chi_vac.data) > 0:
+        fig_chi_vac.update_layout(
+            xaxis_title=r"$\chi\,(\mathrm{eV})$",
+            yaxis_title=r"$\Delta E_{vac}\,(\mathrm{eV})$",
+            legend=dict(font=dict(size=16)),
+            margin=dict(l=20, r=20, t=20, b=20),
+        )
+        fig_chi_vac.update_xaxes(title_font=dict(size=20), tickfont=dict(size=14), automargin=True)
+        fig_chi_vac.update_yaxes(title_font=dict(size=20), tickfont=dict(size=14), automargin=True)
+
     # Render with tuned modebar download (good balance for pubs)
     dl_config = {
         "toImageButtonOptions": {
@@ -387,8 +528,44 @@ with TAB_RES:
     st.plotly_chart(fig_corr, width='stretch', config=dl_config)
 
     if stats_rows:
-        stats_df = pd.DataFrame(stats_rows, columns=["Molecule", "<E_vac> (eV)", "<χ> (eV)", "R²"])
+        stats_df = pd.DataFrame(stats_rows, columns=["Molecule", "<ΔE_vac> (eV)", "<χ> (eV)", "R²"])
         st.dataframe(stats_df, width='stretch')
+
+        export_payload = {
+            "schema_version": 1,
+            "generated_utc": datetime.now(timezone.utc).isoformat(),
+            "molecules": fit_export_entries,
+        }
+
+        zip_buffer = io.BytesIO()
+        used_file_stems = set()
+        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for fit_data in export_payload["molecules"]:
+                molecule = fit_data["molecule"]
+                # Keep molecule names readable while avoiding filesystem-invalid characters.
+                safe_base = re.sub(r"[^A-Za-z0-9._-]+", "_", molecule).strip("._") or "molecule"
+                safe_name = _uniquify_name(safe_base, used_file_stems)
+                mol_payload = {
+                    "schema_version": export_payload["schema_version"],
+                    "generated_utc": export_payload["generated_utc"],
+                    "molecule": molecule,
+                    "E_vac": fit_data["E_vac"],
+                    "chi": fit_data["chi"],
+                    "covariance_matrix": fit_data["covariance_matrix"],
+                }
+                mol_buffer = io.BytesIO()
+                np.save(mol_buffer, mol_payload, allow_pickle=True)
+                mol_buffer.seek(0)
+                zf.writestr(f"{safe_name}.npy", mol_buffer.getvalue())
+
+        zip_buffer.seek(0)
+        st.download_button(
+            "Download fit parameters (.zip)",
+            data=zip_buffer.getvalue(),
+            file_name="spec2epsilon_fit_results.zip",
+            mime="application/zip",
+            help="Download one .npy per fitted molecule (molecule_name.npy) with E_vac, chi and covariance matrix.",
+        )
     else:
         st.info("No stats to display yet (need ≥3 valid points per molecule to fit).")
 
@@ -403,6 +580,18 @@ with TAB_RES:
         }
     }
     st.plotly_chart(fig_res, width='stretch', config=dl_config_res)
+
+    dl_config_chi = {
+        "toImageButtonOptions": {
+            "format": "png",
+            "filename": "chi_vs_evac",
+            "width": 1000,
+            "height": 625,
+            "scale": 2,
+        }
+    }
+    if len(fig_chi_vac.data) > 0:
+        st.plotly_chart(fig_chi_vac, width='stretch', config=dl_config_chi)
 
     
     # Inferred ε

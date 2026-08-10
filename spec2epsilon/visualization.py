@@ -17,9 +17,7 @@ cmap = plt.get_cmap("cividis")
 
 
 def format_number(rate, error_rate, unit="s^-1"):
-    # Check if the rate is zero
-    if rate <= 1e-99:
-        return f"0 ± 0 {unit}"
+
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
